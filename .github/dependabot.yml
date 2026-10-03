@@ -1,0 +1,19 @@
+# 依存関係更新の設定。必要な ecosystem はリポジトリ構成に依存するため
+# security-base からの同期対象外で、このリポジトリで個別に管理する。
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    labels:
+      - "dependencies"
+      - "automated"
+
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    labels:
+      - "dependencies"
+      - "automated"

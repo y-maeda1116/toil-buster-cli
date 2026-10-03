@@ -1,0 +1,61 @@
+name: Reusable TypeScript Security
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: "Node.js version to use"
+        required: false
+        type: string
+        default: "24"
+      package-manager:
+        description: "Package manager (npm or yarn)"
+        required: false
+        type: string
+        default: "npm"
+
+permissions:
+  contents: read
+
+jobs:
+  ts-security:
+    name: TypeScript Security Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install dependencies
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        run: |
+          if [ "$PACKAGE_MANAGER" = "yarn" ]; then
+            yarn install --frozen-lockfile
+          else
+            npm ci
+          fi
+
+      - name: Run npm audit
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        run: |
+          if [ "$PACKAGE_MANAGER" = "yarn" ]; then
+            yarn audit
+          else
+            npm audit --audit-level=high
+          fi
+
+      - name: Run ESLint security check
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        run: |
+          if [ "$PACKAGE_MANAGER" = "yarn" ]; then
+            yarn lint --config .eslintrc.base.json
+          else
+            npx eslint --config .eslintrc.base.json .
+          fi
