@@ -36,7 +36,7 @@ CLI ツールとして提供する。
 | ランタイム | Node.js 24 | ユーザー要件（Actions プラグイン最新メジャー） |
 | CLI フレームワーク | commander | 軽量・標準的。本規模に適切 |
 | テーブル出力 | cli-table3 + chalk | ターミナル表示 |
-| AWS SDK | @aws-sdk/client-cloudwatchlogs v3 | FilterLogEvents + ページネーション |
+| AWS SDK | @aws-sdk/client-cloudwatch-logs v3 | FilterLogEvents + ページネーション |
 | 設定検証 | zod | 設定ファイルの型検証 |
 | テスト | vitest + coverage | カバレッジ 80% 以上目標 |
 
