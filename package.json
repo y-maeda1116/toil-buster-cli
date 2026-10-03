@@ -13,7 +13,6 @@
   ],
   "license": "MIT",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
     "build": "tsup --clean && tsgo --emitDeclarationOnly --declaration --outDir dist --noEmit false",
     "start": "node dist/index.js",
     "test": "vitest run",
