@@ -123,9 +123,15 @@ export async function runErrorsCommand(
     writeOut: (s) => io.stdout(s),
     writeErr: (s) => io.stderr(s),
   });
+  // commander v15 のサブコマンド一覧は "[options]" を自動付与する (legacy 仕様)。
+  // usage() ベースの表示に上書きして "errors <group>" という語を出す。
+  program.configureHelp({
+    subcommandTerm: (cmd) => `${cmd.name()} ${cmd.usage()}`,
+  });
   let parsed: { group: string; options: ErrorsOptions } | undefined;
   program
     .command("errors <group>")
+    .usage("<group>")
     .description("指定期間のエラーログを抽出して統計表示")
     .option("-t, --time <dur>", "時間窓 (10m / 1h / 2d)。デフォルト 15m")
     .option("-l, --level <levels>", "対象レベル (カンマ区切り)。デフォルト ERROR")

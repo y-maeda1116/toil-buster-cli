@@ -7,9 +7,12 @@
     "node": ">=24.0.0"
   },
   "keywords": [
-    "typescript",
-    "template",
-    "nodejs"
+    "cloudwatch",
+    "logs",
+    "sre",
+    "toil",
+    "cli",
+    "error-analysis"
   ],
   "license": "MIT",
   "scripts": {
@@ -52,5 +55,12 @@
     "cli-table3": "^0.6.5",
     "commander": "^15.0.0",
     "zod": "^4.3.6"
-  }
+  },
+  "bin": {
+    "tb": "bin/tb.js"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ]
 }
