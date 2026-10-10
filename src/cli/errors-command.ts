@@ -1,12 +1,118 @@
+import { CloudWatchLogsClient } from "@aws-sdk/client-cloudwatch-logs";
 import { Command, CommanderError } from "commander";
+import { aggregateEvents } from "../core/aggregate.js";
+import { parseDuration } from "../core/duration.js";
+import { loadConfig, resolveGroupName } from "../config/load.js";
+import { CloudWatchProvider } from "../providers/cloudwatch.js";
+import type { LogProvider } from "../providers/types.js";
+import { renderJson } from "../render/json.js";
+import { renderMarkdown } from "../render/markdown.js";
+import { renderTable } from "../render/table.js";
 import { VERSION } from "../version.js";
+import { buildFilterPattern } from "./filter-pattern.js";
 
 export interface CliIo {
   stdout(text: string): void;
   stderr(text: string): void;
 }
 
-export async function runErrorsCommand(argv: string[], io: CliIo): Promise<number> {
+export interface RunDeps {
+  providerFactory(opts: { region?: string; profile?: string }): LogProvider;
+  env: NodeJS.ProcessEnv;
+  now(): Date;
+}
+
+interface ErrorsOptions {
+  time?: string;
+  level?: string;
+  format?: string;
+  top?: string;
+  limit?: string;
+  filter?: string;
+  profile?: string;
+  region?: string;
+}
+
+const DEFAULTS = { time: "15m", level: "ERROR", format: "table", top: 20, limit: 1000 } as const;
+const FORMATS = ["table", "json", "md"] as const;
+
+function positiveInt(flag: string, raw: string | number | undefined, fallback: number): number {
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(`${flag} には正の整数を指定してください: "${raw}"`);
+  }
+  return n;
+}
+
+function classifyError(err: unknown): string {
+  const name = (err as { name?: string }).name;
+  const message = err instanceof Error ? err.message : String(err);
+  switch (name) {
+    case "ResourceNotFoundException":
+      return `ロググループが見つかりません。グループ名と ~/.config/toil-buster/config.json のエイリアスを確認してください (${message})`;
+    case "CredentialsProviderError":
+    case "AccessDeniedException":
+      return `AWS 認証エラー。aws configure または --profile を確認してください (${message})`;
+    default:
+      return `エラー: ${message}`;
+  }
+}
+
+function formatError(err: unknown, format: string): string {
+  const message = classifyError(err);
+  if (format === "json") return `${JSON.stringify({ error: message })}\n`;
+  return `${message}\n`;
+}
+
+async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps): Promise<number> {
+  let format: string = DEFAULTS.format;
+  try {
+    const config = loadConfig(deps.env);
+    const resolvedGroup = resolveGroupName(group, config.aliases);
+    format = o.format ?? config.defaults.format ?? DEFAULTS.format;
+    if (!(FORMATS as readonly string[]).includes(format)) {
+      throw new Error(`不正なフォーマット: "${format}" (table | json | md)`);
+    }
+    const timeSpec = o.time ?? config.defaults.time ?? DEFAULTS.time;
+    const levelSpec = o.level ?? DEFAULTS.level;
+    const top = positiveInt("--top", o.top ?? config.defaults.top, DEFAULTS.top);
+    const limit = positiveInt("--limit", o.limit ?? config.defaults.limit, DEFAULTS.limit);
+    const region = o.region ?? config.defaults.region;
+    const profile = o.profile ?? config.defaults.profile;
+
+    const windowMs = parseDuration(timeSpec);
+    const end = deps.now();
+    const start = new Date(end.getTime() - windowMs);
+    const filterPattern = o.filter ?? buildFilterPattern(levelSpec.split(","));
+
+    const { events, truncated } = await deps
+      .providerFactory({ region, profile })
+      .fetch({ logGroup: resolvedGroup, startTime: start, endTime: end, filterPattern, limit });
+
+    const summary = aggregateEvents(resolvedGroup, start, end, events, truncated);
+    const renderer =
+      format === "json" ? renderJson : format === "md" ? renderMarkdown : renderTable;
+    io.stdout(renderer(summary, top));
+    return 0;
+  } catch (err) {
+    io.stderr(formatError(err, format));
+    return 1;
+  }
+}
+
+// CloudWatchProvider の Sender 型は callable (client.send) なので、
+// client オブジェクトではなく send を bind した関数を渡す (Task 7 の ruling)。
+const defaultProviderFactory = (opts: { region?: string; profile?: string }): LogProvider => {
+  const client = new CloudWatchLogsClient(opts);
+  return new CloudWatchProvider(client.send.bind(client));
+};
+
+export async function runErrorsCommand(
+  argv: string[],
+  io: CliIo,
+  deps?: Partial<RunDeps>
+): Promise<number> {
   const program = new Command();
   program
     .name("tb")
@@ -17,11 +123,32 @@ export async function runErrorsCommand(argv: string[], io: CliIo): Promise<numbe
     writeOut: (s) => io.stdout(s),
     writeErr: (s) => io.stderr(s),
   });
+  let parsed: { group: string; options: ErrorsOptions } | undefined;
+  program
+    .command("errors <group>")
+    .description("指定期間のエラーログを抽出して統計表示")
+    .option("-t, --time <dur>", "時間窓 (10m / 1h / 2d)。デフォルト 15m")
+    .option("-l, --level <levels>", "対象レベル (カンマ区切り)。デフォルト ERROR")
+    .option("-f, --format <fmt>", "出力形式: table | json | md。デフォルト table")
+    .option("--top <n>", "頻度ランキング上位件数。デフォルト 20")
+    .option("--limit <n>", "取得最大イベント数。デフォルト 1000")
+    .option("--filter <pattern>", "CloudWatch フィルタパターン直接指定")
+    .option("--profile <name>", "AWS profile")
+    .option("--region <region>", "AWS region")
+    .action((group, options) => {
+      parsed = { group, options: options as ErrorsOptions };
+    });
   try {
     await program.parseAsync(argv, { from: "user" });
-    return 0;
   } catch (err) {
     if (err instanceof CommanderError) return err.exitCode;
-    throw err;
+    throw err; // 予期しない例外は index.ts の .catch が拾って exit 1
   }
+  if (parsed === undefined) return 0; // --help / --version
+  const fullDeps: RunDeps = {
+    providerFactory: deps?.providerFactory ?? defaultProviderFactory,
+    env: deps?.env ?? process.env,
+    now: deps?.now ?? (() => new Date()),
+  };
+  return execute(parsed.group, parsed.options, io, fullDeps);
 }
