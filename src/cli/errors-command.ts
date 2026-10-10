@@ -66,7 +66,9 @@ function formatError(err: unknown, format: string): string {
 }
 
 async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps): Promise<number> {
-  let format: string = DEFAULTS.format;
+  // loadConfig が throw しても --format json のエラーを構造化 JSON にできるよう、
+  // format は try の前における値で初期化する (妥当性検証は try 内)。
+  let format: string = o.format ?? DEFAULTS.format;
   try {
     const config = loadConfig(deps.env);
     const resolvedGroup = resolveGroupName(group, config.aliases);

@@ -161,6 +161,19 @@ describe("runErrorsCommand: errors", () => {
     expect(io.err.join("")).toContain("設定ファイル");
   });
 
+  it("--format json で破損した設定ファイルでも stderr は構造化 JSON", async () => {
+    const env = withConfig("{ broken");
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--format", "json"],
+      io,
+      makeDeps({ fetch: vi.fn() }, env)
+    );
+    expect(code).toBe(1);
+    const parsed = JSON.parse(io.err.join(""));
+    expect(parsed.error).toContain("設定ファイル");
+  });
+
   it("0 件は exit 0 でメッセージ表示", async () => {
     const fetch = vi
       .fn<(q: LogQuery) => Promise<FetchResult>>()
