@@ -13,7 +13,7 @@ main 以外のブランチ・リリースはサポート対象外です。
 脆弱性を発見した場合は、公開の issue ではなく
 **GitHub のプライベート脆弱性報告 (Private Vulnerability Reporting)** を使って報告してください。
 
-報告フォーム: https://github.com/y-maeda1116/ts-template-base/security/advisories/new
+報告フォーム: https://github.com/y-maeda1116/toil-buster-cli/security/advisories/new
 
 1. 上のURL (またはこのリポジトリの **Security** タブの **Report a vulnerability**) を開く
 2. **Report a vulnerability** を選択
