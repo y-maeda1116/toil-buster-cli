@@ -3,7 +3,9 @@ import { formatWindow } from "./format.js";
 
 const EMPTY_MESSAGE = "該当時間帯にエラーは見つかりませんでした";
 const PATTERN_MAX = 80;
-const escapeCell = (text: string) => text.replace(/\|/g, "\\|");
+// CodeQL: pipe のみエスケープすると入力の backslash と結合して壊れるため、
+// backslash を先に二重化してから pipe をエスケープする。
+const escapeCell = (text: string) => text.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 // スタックトレース等の複数行 pattern はテーブル行を壊すため 1 行化し、
 // table.ts と同じ長さ cap を適用する。
 const flattenPattern = (pattern: string) => {

@@ -72,6 +72,31 @@ describe("renderMarkdown", () => {
     expect(out).not.toContain(`${"x".repeat(81)}`);
   });
 
+  it("backslash は先に二重化され pipe と組み合わせてもエスケープが壊れない", () => {
+    const pattern = "a\\|b";
+    const out = renderMarkdown(
+      {
+        ...base,
+        groups: [
+          {
+            pattern,
+            count: 1,
+            firstSeen: base.groups[0]!.firstSeen,
+            lastSeen: base.groups[0]!.lastSeen,
+            sample: pattern,
+          },
+        ],
+      },
+      20
+    );
+    const expected = pattern.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
+    expect(out).toContain(expected);
+    // データ行のセル数が変わらないこと (未エスケープの pipe だけで分割すると
+    // 6 セル + 前後の空文字列で 8 分割)
+    const dataRow = out.split("\n").find((l) => l.startsWith("| 1 |"));
+    expect(dataRow!.split(/(?<!\\)\|/).length).toBe(8);
+  });
+
   it("0 件はメッセージのみでテーブル行を持たない", () => {
     const out = renderMarkdown({ ...base, groups: [], totalEvents: 0 }, 20);
     expect(out).toContain("該当時間帯にエラーは見つかりませんでした");
