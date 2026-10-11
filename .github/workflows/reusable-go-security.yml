@@ -1,0 +1,73 @@
+name: Reusable Go Security
+
+on:
+  workflow_call:
+    inputs:
+      go-version:
+        description: "Go version to use"
+        required: false
+        type: string
+        # 1.26.x = マイナーを固定しパッチに自動追従。正確なパッチピンだと stdlib の
+        # セキュリティ修正 (GO-2026-6218/6090/5972/5026 等) のたびに手動バンプが必要で
+        # 定期監査が失敗し続ける (Issue #60)。マイナー (1.27) は手動更新のまま。
+        default: "1.26.x"
+      golangci-lint-version:
+        description: "golangci-lint version"
+        required: false
+        type: string
+        default: "v2.13.2"
+      govulncheck-version:
+        description: "govulncheck version"
+        required: false
+        type: string
+        # v1.1.3 は Go 1.26 でビルド不可 (依存の x/tools@v0.23.0 が
+        # tokeninternal でコンパイルエラー)。v1.7.0 は Go 1.26 系で稼働確認済み。
+        default: "v1.7.0"
+      working-directory:
+        description: "Working directory for lint/vulncheck (e.g. a nested Go module)"
+        required: false
+        type: string
+        default: "."
+      golangci-config:
+        description: "Path to golangci-lint config, repo-relative (resolved against github.workspace)"
+        required: false
+        type: string
+        default: ".golangci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  go-security:
+    name: Go Security Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: ${{ inputs.go-version }}
+          # go-version が 1.26.x のようなパッチ範囲のとき、ランナーのツールキャッシュに
+          # 古いパッチがあればそれを優先してしまうため、最新パッチの解決を強制する。
+          check-latest: true
+
+      # golangci-lint v2 fails on relative ../ config paths under --path-mode=abs,
+      # so resolve the config against the workspace root here (github.workspace is
+      # reliably available inside the workflow's own step context).
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a
+        with:
+          version: ${{ inputs.golangci-lint-version }}
+          working-directory: ${{ inputs.working-directory }}
+          args: --config=${{ github.workspace }}/${{ inputs.golangci-config }} ./...
+
+      - name: Run govulncheck
+        env:
+          CGO_ENABLED: "0"
+          GOVULNCHECK_VERSION: ${{ inputs.govulncheck-version }}
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+          govulncheck ./...

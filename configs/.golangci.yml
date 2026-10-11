@@ -1,0 +1,41 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - gosec
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+  settings:
+    gosec:
+      severity: medium
+      confidence: medium
+      excludes:
+        - G104
+    errcheck:
+      check-type-assertions: true
+      # `_ =` はGoの慣用的な「意図的なエラー無視」の明示表現として扱う。
+      # 完全に無視される呼び出し (代入すらない) は引き続き検出する。
+      # check-blank: true にすると cleanup の _ = Close/RemoveAll まで誤検知される。
+      check-blank: false
+  exclusions:
+    rules:
+      # テストコードは信頼されたフィクスチャを扱うため、gosec のファイルI/O系
+      # (G304/G306/G301) と errcheck を除外。本番コードは厳格に検査する。
+      # v2 では issues.exclude-rules ではなく linters.exclusions.rules。
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+
+# output: v2 デフォルト (colored-line-number, linter名・行番号表示) を使用。
+# 旧リスト形式の formats は v2.11+ で 'output.formats expected a map' エラーになるため削除。
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 10
