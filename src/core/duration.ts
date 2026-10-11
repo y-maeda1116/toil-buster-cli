@@ -12,9 +12,9 @@ export function parseDuration(input: string): number {
   if (!match) {
     throw new Error(`Invalid duration: "${input}" (例: 10m, 1h, 2d)`);
   }
-  const ms = Number(match[1]) * UNIT_MS[match[2]!]!;
-  if (ms <= 0) {
+  const value = Number(match[1]);
+  if (value <= 0) {
     throw new Error(`Invalid duration: "${input}" (0 より大きい値を指定してください)`);
   }
-  return ms;
+  return value * UNIT_MS[match[2]!]!;
 }
