@@ -59,9 +59,14 @@ tb errors /aws/lambda/prod-api --format json | jq '.groups[0]'
 npm install
 npm test        # vitest
 npm run lint    # eslint (+ eslint-plugin-security)
-npm run typecheck  # tsgo (TypeScript 7系)
+npm run typecheck  # tsc (TypeScript 7系)
 npm run build   # tsup → dist/index.js
 ```
+
+> **Note:** TypeScript 7 は `typescript-eslint`・`tsup` が依存する JavaScript コンパイラ API をまだ提供していません。
+> [upstream の side-by-side 構成](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#running-side-by-side-with-typescript-6-0)に従い、
+> `@typescript/native` を `typescript@7` のエイリアス（`tsc` を提供）、`typescript` を `@typescript/typescript6` のエイリアスとし、
+> `typescript` API を読み込むツールにはサポート対象の 6.x API を渡しています。
 
 ## ライセンス
 
