@@ -29,7 +29,25 @@ tb errors prod-api --time 2h --bucket 5m
 
 # 直前 1 時間との比較で「新規 / 増えた」エラーだけ注目
 tb errors prod-api --time 1h --compare 1h
+
+# 複数グループをまとめて確認 (カンマ区切り)
+tb errors prod-api,batch-worker --time 1h
+
+# ワイルドカードでパターン一致するグループを一括抽出 (DescribeLogGroups で展開)
+tb errors "prod-api-*" --time 30m
 ```
+
+### ロググループの指定
+
+`<group>` には次のいずれかを指定できます（カンマ区切りで併用可、重複は自動排除）:
+
+- **エイリアス**: 設定ファイルの `aliases` で解決（例: `prod-api`）
+- **完全名**: `/aws/lambda/prod-api` のようなロググループ名そのもの
+- **末尾ワイルドカード**: `prod-api-*` のように末尾 `*` で prefix 一致するグループを
+  DescribeLogGroups で展開（展開数は最大 20 グループ。0 件の場合はエラーで終了）
+
+複数グループを指定した場合、各グループごとに fetch → 集計して出力します。
+`--format table` / `md` はグループごとのセクション連結、`--format json` は結果の配列になります。
 
 ### オプション
 

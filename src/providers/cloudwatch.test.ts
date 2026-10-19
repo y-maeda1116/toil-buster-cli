@@ -90,3 +90,38 @@ describe("CloudWatchProvider", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("CloudWatchProvider.listGroupNames", () => {
+  it("DescribeLogGroups で prefix 一致のロググループ名を返す", async () => {
+    const send = vi.fn<Send>().mockResolvedValue({
+      $metadata: {},
+      logGroups: [
+        { logGroupName: "/aws/lambda/prod-api" },
+        { logGroupName: "/aws/lambda/prod-api-worker" },
+      ],
+    } as never);
+    const provider = new CloudWatchProvider(send, { retryDelayMs: 0 });
+    const names = await provider.listGroupNames("prod-api-");
+    expect(names).toEqual(["/aws/lambda/prod-api", "/aws/lambda/prod-api-worker"]);
+    expect(send.mock.calls[0]![0].input).toMatchObject({ logGroupNamePrefix: "prod-api-" });
+  });
+
+  it("nextToken がある限りページングする", async () => {
+    const send = vi
+      .fn<Send>()
+      .mockResolvedValueOnce({
+        $metadata: {},
+        logGroups: [{ logGroupName: "/a" }],
+        nextToken: "t1",
+      } as never)
+      .mockResolvedValueOnce({
+        $metadata: {},
+        logGroups: [{ logGroupName: "/b" }],
+      } as never);
+    const provider = new CloudWatchProvider(send, { retryDelayMs: 0 });
+    const names = await provider.listGroupNames("/aws/");
+    expect(names).toEqual(["/a", "/b"]);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1]![0].input).toMatchObject({ nextToken: "t1" });
+  });
+});

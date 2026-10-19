@@ -1,12 +1,14 @@
 import { CloudWatchLogsClient } from "@aws-sdk/client-cloudwatch-logs";
 import { Command, CommanderError } from "commander";
 import { aggregateEvents } from "../core/aggregate.js";
+import type { SummaryResult } from "../core/aggregate.js";
 import { parseDuration } from "../core/duration.js";
 import { compareGroups } from "../core/compare.js";
-import { loadConfig, resolveGroupName } from "../config/load.js";
+import { resolveGroupExpressions } from "../core/resolve-groups.js";
+import { loadConfig } from "../config/load.js";
 import { CloudWatchProvider } from "../providers/cloudwatch.js";
 import type { LogProvider } from "../providers/types.js";
-import { renderJson } from "../render/json.js";
+import { renderJson, toJsonValue } from "../render/json.js";
 import { renderMarkdown } from "../render/markdown.js";
 import { renderTable } from "../render/table.js";
 import { VERSION } from "../version.js";
@@ -71,13 +73,26 @@ function formatError(err: unknown, format: string): string {
   return `${message}\n`;
 }
 
+// 単一グループは従来どおり 1 オブジェクト、複数グループは table/md はセクション連結、
+// json は配列で出す。
+function renderResults(results: SummaryResult[], format: string, top: number): string {
+  const renderer = format === "json" ? renderJson : format === "md" ? renderMarkdown : renderTable;
+  if (results.length === 1) return renderer(results[0]!, top);
+  if (format === "json")
+    return `${JSON.stringify(
+      results.map((r) => toJsonValue(r, top)),
+      null,
+      2
+    )}\n`;
+  return results.map((r) => renderer(r, top)).join("\n");
+}
+
 async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps): Promise<number> {
   // loadConfig が throw しても --format json のエラーを構造化 JSON にできるよう、
   // format は try の前における値で初期化する (妥当性検証は try 内)。
   let format: string = o.format ?? DEFAULTS.format;
   try {
     const config = loadConfig(deps.env);
-    const resolvedGroup = resolveGroupName(group, config.aliases);
     format = o.format ?? config.defaults.format ?? DEFAULTS.format;
     if (!(FORMATS as readonly string[]).includes(format)) {
       throw new Error(`不正なフォーマット: "${format}" (table | json | md)`);
@@ -102,56 +117,59 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
     const filterPattern = o.filter ?? buildFilterPattern(levelSpec.split(","));
     const compareMs = o.compare === undefined ? undefined : parseDuration(o.compare);
     const provider = deps.providerFactory({ region, profile });
+    const groups = await resolveGroupExpressions(group, config.aliases, provider);
 
-    const { events, truncated } = await provider.fetch({
-      logGroup: resolvedGroup,
-      startTime: window.start,
-      endTime: window.end,
-      filterPattern,
-      limit,
-    });
+    const results: SummaryResult[] = [];
+    for (const logGroup of groups) {
+      const { events, truncated } = await provider.fetch({
+        logGroup,
+        startTime: window.start,
+        endTime: window.end,
+        filterPattern,
+        limit,
+      });
 
-    const summary = aggregateEvents(
-      resolvedGroup,
-      window.start,
-      window.end,
-      events,
-      truncated,
-      bucketMs
-    );
+      const summary = aggregateEvents(
+        logGroup,
+        window.start,
+        window.end,
+        events,
+        truncated,
+        bucketMs
+      );
 
-    let result = summary;
-    if (compareMs !== undefined) {
+      if (compareMs === undefined) {
+        results.push(summary);
+        continue;
+      }
       // 比較窓は現在窓の直前に隣接する同 filterPattern / limit のクエリ。
       const compareEnd = window.start;
       const compareStart = new Date(compareEnd.getTime() - compareMs);
       const prev = await provider.fetch({
-        logGroup: resolvedGroup,
+        logGroup,
         startTime: compareStart,
         endTime: compareEnd,
         filterPattern,
         limit,
       });
       const prevSummary = aggregateEvents(
-        resolvedGroup,
+        logGroup,
         compareStart,
         compareEnd,
         prev.events,
         prev.truncated
       );
-      result = {
+      results.push({
         ...summary,
         comparison: {
           timeWindow: { start: compareStart, end: compareEnd },
           totalEvents: prevSummary.totalEvents,
           groups: compareGroups(summary.groups, prevSummary.groups),
         },
-      };
+      });
     }
 
-    const renderer =
-      format === "json" ? renderJson : format === "md" ? renderMarkdown : renderTable;
-    io.stdout(renderer(result, top));
+    io.stdout(renderResults(results, format, top));
     return 0;
   } catch (err) {
     io.stderr(formatError(err, format));
