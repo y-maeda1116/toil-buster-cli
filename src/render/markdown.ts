@@ -19,7 +19,9 @@ export function renderMarkdown(result: SummaryResult, top: number): string {
     `# Log Summary: ${result.logGroup}`,
     "",
     `- 期間: ${formatWindow(result.timeWindow.start, result.timeWindow.end)}`,
-    `- イベント数: ${result.totalEvents}${result.truncated ? "（--limit により打ち切り）" : ""}`,
+    `- イベント数: ${result.totalEvents}${result.truncated ? "（--limit により打ち切り）" : ""}${
+      result.ignoredEvents !== undefined ? `（ignored: ${result.ignoredEvents}）` : ""
+    }`,
   ];
   if (result.groups.length === 0) {
     lines.push("", EMPTY_MESSAGE);

@@ -467,3 +467,50 @@ describe("runErrorsCommand: errors", () => {
     expect(factory).toHaveBeenCalledWith({ region: "ap-northeast-1", profile: "prod" });
   });
 });
+
+describe("runErrorsCommand: ignore", () => {
+  const ignoredResult: FetchResult = {
+    events: [
+      { timestamp: new Date("2026-10-03T09:55:00Z"), message: "timeout id=1111" },
+      { timestamp: new Date("2026-10-03T09:56:00Z"), message: "NoSuchElementException" },
+    ],
+    truncated: false,
+  };
+  const envWithIgnore = (extra: Record<string, unknown> = {}) =>
+    withConfig(JSON.stringify({ ignore: ["NoSuchElementException"], ...extra }));
+
+  it("config ignore に一致するパターンはデフォルトで除外し ignored 件数を表示する", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(ignoredResult);
+    const io = makeIo();
+    const code = await runErrorsCommand(["errors", "g"], io, makeDeps({ fetch }, envWithIgnore()));
+    expect(code).toBe(0);
+    const out = io.out.join("");
+    expect(out).toContain("timeout id=<num>");
+    expect(out).not.toContain("NoSuchElementException");
+    expect(out).toContain("ignored: 1");
+  });
+
+  it("--show-ignored で除外パターンも表示する", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(ignoredResult);
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--show-ignored"],
+      io,
+      makeDeps({ fetch }, envWithIgnore())
+    );
+    expect(code).toBe(0);
+    expect(io.out.join("")).toContain("NoSuchElementException");
+  });
+
+  it("config ignore の正規表現が不正ならエラーで終了する", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>();
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g"],
+      io,
+      makeDeps({ fetch }, withConfig(JSON.stringify({ ignore: ["/[unclosed/"] })))
+    );
+    expect(code).toBe(1);
+    expect(io.err.join("")).toContain("ignore パターンの正規表現が不正です");
+  });
+});

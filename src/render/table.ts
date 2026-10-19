@@ -61,7 +61,9 @@ function truncatePattern(pattern: string): string {
 export function renderTable(result: SummaryResult, top: number): string {
   const lines = [
     chalk.bold(`Log Group: ${result.logGroup}`),
-    `Window: ${formatWindow(result.timeWindow.start, result.timeWindow.end)}  Events: ${result.totalEvents}`,
+    `Window: ${formatWindow(result.timeWindow.start, result.timeWindow.end)}  Events: ${result.totalEvents}${
+      result.ignoredEvents !== undefined ? ` (ignored: ${result.ignoredEvents})` : ""
+    }`,
   ];
   if (result.truncated) lines.push(chalk.yellow("⚠ --limit に達したため結果を打ち切りました"));
   if (result.groups.length === 0) {

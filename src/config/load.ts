@@ -3,6 +3,9 @@ import { z } from "zod";
 
 const configSchema = z.object({
   aliases: z.record(z.string(), z.string()).default({}),
+  // 抑制する既知エラーのパターン。/.../ 形式は正規表現、それ以外は正規化済み
+  // パターンとの完全一致。
+  ignore: z.array(z.string()).default([]),
   defaults: z
     .object({
       region: z.string().optional(),
@@ -33,7 +36,7 @@ export function loadConfig(env: ConfigEnv): AppConfig {
   try {
     raw = readFileSync(path, "utf8");
   } catch {
-    return { aliases: {}, defaults: {} };
+    return { aliases: {}, ignore: [], defaults: {} };
   }
   let parsed: unknown;
   try {
