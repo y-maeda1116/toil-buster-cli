@@ -18,4 +18,6 @@ export interface FetchResult {
 
 export interface LogProvider {
   fetch(query: LogQuery): Promise<FetchResult>;
+  /** 末尾ワイルドカード展開用の prefix 検索 (DescribeLogGroups)。 */
+  listGroupNames(prefix: string): Promise<string[]>;
 }
