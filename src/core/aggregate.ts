@@ -1,5 +1,6 @@
 import type { LogEvent } from "../providers/types.js";
 import { normalizeMessage } from "./normalize.js";
+import { computeTimeline, type TimeBucket } from "./timeline.js";
 
 export interface ErrorGroupStats {
   pattern: string;
@@ -15,6 +16,7 @@ export interface SummaryResult {
   totalEvents: number;
   truncated: boolean;
   groups: ErrorGroupStats[];
+  timeline?: TimeBucket[];
 }
 
 export function aggregateEvents(
@@ -22,7 +24,8 @@ export function aggregateEvents(
   start: Date,
   end: Date,
   events: readonly LogEvent[],
-  truncated: boolean
+  truncated: boolean,
+  bucketMs?: number
 ): SummaryResult {
   const groups = new Map<string, ErrorGroupStats>();
   for (const e of events) {
@@ -44,5 +47,8 @@ export function aggregateEvents(
     totalEvents: events.length,
     truncated,
     groups: [...groups.values()].sort((a, b) => b.count - a.count),
+    ...(bucketMs !== undefined
+      ? { timeline: computeTimeline(events, { start, end }, bucketMs) }
+      : {}),
   };
 }

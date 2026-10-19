@@ -36,4 +36,20 @@ describe("renderJson", () => {
     const empty = { ...base, groups: [], totalEvents: 0 };
     expect(JSON.parse(renderJson(empty, 20)).groups).toEqual([]);
   });
+
+  it("timeline があれば ISO 文字列付きでそのまま出力する", () => {
+    const withTimeline = {
+      ...base,
+      timeline: [
+        {
+          start: new Date("2026-10-03T09:00:00Z"),
+          end: new Date("2026-10-03T09:05:00Z"),
+          count: 2,
+        },
+      ],
+    };
+    const parsed = JSON.parse(renderJson(withTimeline, 20));
+    expect(parsed.timeline[0].count).toBe(2);
+    expect(parsed.timeline[0].start).toBe("2026-10-03T09:00:00.000Z");
+  });
 });

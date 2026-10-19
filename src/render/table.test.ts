@@ -45,4 +45,30 @@ describe("renderTable", () => {
     const r = { ...result([group("a", 1)]), truncated: true };
     expect(renderTable(r, 20)).toContain("--limit");
   });
+
+  it("timeline がある場合はバケット時刻・件数・バーを含むセクションを出す", () => {
+    const r = {
+      ...result([group("a", 3)]),
+      timeline: [
+        {
+          start: new Date("2026-10-03T09:00:00Z"),
+          end: new Date("2026-10-03T09:05:00Z"),
+          count: 3,
+        },
+        {
+          start: new Date("2026-10-03T09:05:00Z"),
+          end: new Date("2026-10-03T09:10:00Z"),
+          count: 0,
+        },
+      ],
+    };
+    const out = renderTable(r, 20);
+    expect(out).toContain("Timeline");
+    expect(out).toContain("3");
+    expect(out).toContain("█");
+  });
+
+  it("timeline が無い場合は Timeline セクションを出さない", () => {
+    expect(renderTable(result([group("a", 1)]), 20)).not.toContain("Timeline");
+  });
 });

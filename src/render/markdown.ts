@@ -1,4 +1,5 @@
 import type { SummaryResult } from "../core/aggregate.js";
+import type { TimeBucket } from "../core/timeline.js";
 import { formatWindow } from "./format.js";
 
 const EMPTY_MESSAGE = "該当時間帯にエラーは見つかりませんでした";
@@ -33,5 +34,17 @@ export function renderMarkdown(result: SummaryResult, top: number): string {
       )} |`
     );
   }
+  if (result.timeline) lines.push(...timelineLines(result.timeline));
   return `${lines.join("\n")}\n`;
+}
+
+// 報告書は GitHub で閲覧されるため bar はユニバーサルに見える文字を使う。
+function timelineLines(buckets: readonly TimeBucket[]): string[] {
+  const max = Math.max(...buckets.map((b) => b.count), 1);
+  const lines = ["", "## Timeline", "", "| bucket (UTC) | count | bar |", "|---|---|---|"];
+  for (const b of buckets) {
+    const bar = "▇".repeat(Math.round((b.count / max) * 30));
+    lines.push(`| ${b.start.toISOString().replace(".000Z", "Z")} | ${b.count} | ${bar || " "} |`);
+  }
+  return lines;
 }

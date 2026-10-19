@@ -102,4 +102,29 @@ describe("renderMarkdown", () => {
     expect(out).toContain("該当時間帯にエラーは見つかりませんでした");
     expect(out).not.toContain("| # |");
   });
+
+  it("timeline がある場合はバケットごとの md テーブルを出す", () => {
+    const out = renderMarkdown(
+      {
+        ...base,
+        timeline: [
+          {
+            start: new Date("2026-10-03T09:00:00Z"),
+            end: new Date("2026-10-03T09:05:00Z"),
+            count: 1,
+          },
+          {
+            start: new Date("2026-10-03T09:05:00Z"),
+            end: new Date("2026-10-03T09:10:00Z"),
+            count: 0,
+          },
+        ],
+      },
+      20
+    );
+    expect(out).toContain("## Timeline");
+    expect(out).toContain("| bucket (UTC) | count | bar |");
+    expect(out).toMatch(/2026-10-03T09:00:00Z \| 1 \| ▇/);
+    expect(out).toMatch(/2026-10-03T09:05:00Z \| 0 \|\s*\|/);
+  });
 });
