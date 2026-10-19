@@ -68,6 +68,70 @@ const makeDeps = (
   now: () => NOW,
 });
 
+describe("runErrorsCommand: since/until", () => {
+  it("--since/--until が provider のクエリにそのまま渡る", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--since", "2026-10-01T09:00:00Z", "--until", "2026-10-01T10:30:00Z"],
+      io,
+      makeDeps({ fetch })
+    );
+    expect(code).toBe(0);
+    expect(fetch.mock.calls[0]![0].startTime.toISOString()).toBe("2026-10-01T09:00:00.000Z");
+    expect(fetch.mock.calls[0]![0].endTime.toISOString()).toBe("2026-10-01T10:30:00.000Z");
+  });
+
+  it("--since のみ指定は end が now になる", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--since", "2026-10-03T09:30:00Z"],
+      io,
+      makeDeps({ fetch })
+    );
+    expect(code).toBe(0);
+    expect(fetch.mock.calls[0]![0].startTime.toISOString()).toBe("2026-10-03T09:30:00.000Z");
+    expect(fetch.mock.calls[0]![0].endTime).toBe(NOW);
+  });
+
+  it("--time と --since の同時指定は exit 1", async () => {
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--time", "1h", "--since", "2026-10-03T09:30:00Z"],
+      io,
+      makeDeps({ fetch: vi.fn() })
+    );
+    expect(code).toBe(1);
+    expect(io.err.join("")).toContain("--time");
+  });
+
+  it("不正な --since は exit 1 で Invalid datetime", async () => {
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--since", "10/19/2026"],
+      io,
+      makeDeps({ fetch: vi.fn() })
+    );
+    expect(code).toBe(1);
+    expect(io.err.join("")).toContain("Invalid datetime");
+  });
+
+  it("--until のみ + 設定の defaults.time でもエラーにならず窓が計算される", async () => {
+    const env = withConfig(JSON.stringify({ defaults: { time: "30m" } }));
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--until", "2026-10-02T15:00:00Z"],
+      io,
+      makeDeps({ fetch }, env)
+    );
+    expect(code).toBe(0);
+    expect(fetch.mock.calls[0]![0].endTime.toISOString()).toBe("2026-10-02T15:00:00.000Z");
+    expect(fetch.mock.calls[0]![0].startTime.toISOString()).toBe("2026-10-02T14:30:00.000Z");
+  });
+});
+
 describe("runErrorsCommand: errors", () => {
   it("デフォルトで 15m 窓・ERROR タームフィルタ・limit 1000 でクエリし、table 出力する", async () => {
     const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
