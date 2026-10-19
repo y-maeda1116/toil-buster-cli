@@ -52,4 +52,30 @@ describe("renderJson", () => {
     expect(parsed.timeline[0].count).toBe(2);
     expect(parsed.timeline[0].start).toBe("2026-10-03T09:00:00.000Z");
   });
+
+  it("comparison があればそのまま出力する", () => {
+    const withComparison = {
+      ...base,
+      comparison: {
+        timeWindow: {
+          start: new Date("2026-10-03T08:00:00Z"),
+          end: new Date("2026-10-03T09:00:00Z"),
+        },
+        totalEvents: 3,
+        groups: [
+          {
+            pattern: "timeout <num>",
+            count: 2,
+            prevCount: 3,
+            delta: -1,
+            status: "decreased" as const,
+          },
+        ],
+      },
+    };
+    const parsed = JSON.parse(renderJson(withComparison, 20));
+    expect(parsed.comparison.totalEvents).toBe(3);
+    expect(parsed.comparison.groups[0].status).toBe("decreased");
+    expect(parsed.comparison.timeWindow.start).toBe("2026-10-03T08:00:00.000Z");
+  });
 });

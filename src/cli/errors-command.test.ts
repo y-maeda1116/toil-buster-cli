@@ -181,6 +181,99 @@ describe("runErrorsCommand: bucket (timeline)", () => {
   });
 });
 
+describe("runErrorsCommand: compare (diff)", () => {
+  const prevResult: FetchResult = {
+    events: [
+      { timestamp: new Date("2026-10-03T09:35:00Z"), message: "timeout id=3333" },
+      { timestamp: new Date("2026-10-03T09:40:00Z"), message: "oom id=aaaa-bbbb" },
+    ],
+    truncated: false,
+  };
+
+  it("--compare 1h は直前 1h 窓も fetch して比較セクションを出す", async () => {
+    const fetch = vi
+      .fn<(q: LogQuery) => Promise<FetchResult>>()
+      .mockResolvedValueOnce(okResult)
+      .mockResolvedValueOnce(prevResult);
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--compare", "1h"],
+      io,
+      makeDeps({ fetch })
+    );
+    expect(code).toBe(0);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const prevQuery = fetch.mock.calls[1]![0];
+    // 現在窓: 09:45〜10:00 / 比較窓: 08:45〜09:45 (直前に隣接・幅 1h)
+    expect(prevQuery.startTime.toISOString()).toBe("2026-10-03T08:45:00.000Z");
+    expect(prevQuery.endTime.toISOString()).toBe("2026-10-03T09:45:00.000Z");
+    expect(io.out.join("")).toContain("Comparison");
+  });
+
+  it("--compare 未指定は fetch 1 回で Comparison を出さない", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const io = makeIo();
+    const code = await runErrorsCommand(["errors", "g"], io, makeDeps({ fetch }));
+    expect(code).toBe(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(io.out.join("")).not.toContain("Comparison");
+  });
+
+  it("新規パターンは NEW として表示する", async () => {
+    const fetch = vi
+      .fn<(q: LogQuery) => Promise<FetchResult>>()
+      .mockResolvedValueOnce(okResult) // timeout のみ
+      .mockResolvedValueOnce({ events: [], truncated: false });
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--compare", "15m"],
+      io,
+      makeDeps({ fetch })
+    );
+    expect(code).toBe(0);
+    expect(io.out.join("")).toContain("NEW");
+    expect(io.out.join("")).toContain("timeout id=<num>");
+  });
+
+  it("--format json は comparison を含む", async () => {
+    const fetch = vi
+      .fn<(q: LogQuery) => Promise<FetchResult>>()
+      .mockResolvedValueOnce(okResult)
+      .mockResolvedValueOnce(prevResult);
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--format", "json", "--compare", "15m"],
+      io,
+      makeDeps({ fetch })
+    );
+    expect(code).toBe(0);
+    const parsed = JSON.parse(io.out.join(""));
+    expect(parsed.comparison.totalEvents).toBe(2);
+    expect(
+      Object.fromEntries(
+        parsed.comparison.groups.map((g: { pattern: string; status: string }) => [
+          g.pattern,
+          g.status,
+        ])
+      )
+    ).toEqual({
+      "timeout id=<num>": "increased", // 現在 2 件 vs 比較窓 1 件
+      "oom id=aaaa-bbbb": "resolved", // 比較窓のみ
+    });
+  });
+
+  it("不正な --compare は exit 1 で Invalid duration", async () => {
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--compare", "bad"],
+      io,
+      makeDeps({ fetch: vi.fn() })
+    );
+    expect(code).toBe(1);
+    expect(io.err.join("")).toContain("Invalid duration");
+  });
+});
+
 describe("runErrorsCommand: errors", () => {
   it("デフォルトで 15m 窓・ERROR タームフィルタ・limit 1000 でクエリし、table 出力する", async () => {
     const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
