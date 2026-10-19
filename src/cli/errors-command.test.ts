@@ -132,6 +132,55 @@ describe("runErrorsCommand: since/until", () => {
   });
 });
 
+describe("runErrorsCommand: bucket (timeline)", () => {
+  it("--bucket 5m で Timeline セクションを table 出力に含める", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const io = makeIo();
+    const code = await runErrorsCommand(["errors", "g", "--bucket", "5m"], io, makeDeps({ fetch }));
+    expect(code).toBe(0);
+    expect(io.out.join("")).toContain("Timeline");
+  });
+
+  it("--format json --bucket 5m は timeline を JSON に含める", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--format", "json", "--bucket", "5m"],
+      io,
+      makeDeps({ fetch })
+    );
+    expect(code).toBe(0);
+    const parsed = JSON.parse(io.out.join(""));
+    expect(parsed.timeline).toHaveLength(3); // 15m / 5m = 3 バケット
+    expect(parsed.timeline.map((b: { count: number }) => b.count)).toEqual([0, 0, 2]); // 2 件とも 09:55/09:58
+  });
+
+  it("不正な --bucket は exit 1 で Invalid duration", async () => {
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--bucket", "bad"],
+      io,
+      makeDeps({ fetch: vi.fn() })
+    );
+    expect(code).toBe(1);
+    expect(io.err.join("")).toContain("Invalid duration");
+  });
+
+  it("バケット数が上限を超える組み合わせは exit 1 でガイドを出す", async () => {
+    const fetch = vi
+      .fn<(q: LogQuery) => Promise<FetchResult>>()
+      .mockResolvedValue({ events: [], truncated: false });
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--time", "2d", "--bucket", "1s"],
+      io,
+      makeDeps({ fetch })
+    );
+    expect(code).toBe(1);
+    expect(io.err.join("")).toContain("バケット数が多すぎます");
+  });
+});
+
 describe("runErrorsCommand: errors", () => {
   it("デフォルトで 15m 窓・ERROR タームフィルタ・limit 1000 でクエリし、table 出力する", async () => {
     const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);

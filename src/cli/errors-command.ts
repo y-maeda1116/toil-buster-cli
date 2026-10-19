@@ -1,6 +1,7 @@
 import { CloudWatchLogsClient } from "@aws-sdk/client-cloudwatch-logs";
 import { Command, CommanderError } from "commander";
 import { aggregateEvents } from "../core/aggregate.js";
+import { parseDuration } from "../core/duration.js";
 import { loadConfig, resolveGroupName } from "../config/load.js";
 import { CloudWatchProvider } from "../providers/cloudwatch.js";
 import type { LogProvider } from "../providers/types.js";
@@ -26,6 +27,7 @@ interface ErrorsOptions {
   time?: string;
   since?: string;
   until?: string;
+  bucket?: string;
   level?: string;
   format?: string;
   top?: string;
@@ -88,6 +90,7 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
       { time: timeSpec, since: o.since, until: o.until },
       deps.now()
     );
+    const bucketMs = o.bucket === undefined ? undefined : parseDuration(o.bucket);
     const levelSpec = o.level ?? DEFAULTS.level;
     const top = positiveInt("--top", o.top ?? config.defaults.top, DEFAULTS.top);
     const limit = positiveInt("--limit", o.limit ?? config.defaults.limit, DEFAULTS.limit);
@@ -104,7 +107,14 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
       limit,
     });
 
-    const summary = aggregateEvents(resolvedGroup, window.start, window.end, events, truncated);
+    const summary = aggregateEvents(
+      resolvedGroup,
+      window.start,
+      window.end,
+      events,
+      truncated,
+      bucketMs
+    );
     const renderer =
       format === "json" ? renderJson : format === "md" ? renderMarkdown : renderTable;
     io.stdout(renderer(summary, top));
@@ -150,6 +160,7 @@ export async function runErrorsCommand(
     .option("-t, --time <dur>", "時間窓 (10m / 1h / 2d)。デフォルト 15m")
     .option("--since <datetime>", "開始時刻 (ISO 8601。例: 2026-10-18T14:00)。--time と併用不可")
     .option("--until <datetime>", "終了時刻 (ISO 8601)。省略時は現在時刻")
+    .option("--bucket <dur>", "タイムラインのバケット幅 (例: 5m)。指定時は時間別カウントを表示")
     .option("-l, --level <levels>", "対象レベル (カンマ区切り)。デフォルト ERROR")
     .option("-f, --format <fmt>", "出力形式: table | json | md。デフォルト table")
     .option("--top <n>", "頻度ランキング上位件数。デフォルト 20")
