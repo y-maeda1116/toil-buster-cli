@@ -39,6 +39,9 @@ tb errors "prod-api-*" --time 30m
 # 既知エラーを抑制して新しいパターンだけ注目 (--show-ignored で確認モード)
 tb errors prod-api --time 1h
 tb errors prod-api --time 1h --show-ignored
+
+# インシデントレポートとして Markdown 保存 (実行時刻・フィルタ条件を含む)
+tb errors prod-api --time 2h --save incident-20261019.md
 ```
 
 ### ロググループの指定
@@ -68,6 +71,7 @@ tb errors prod-api --time 1h --show-ignored
 | `--limit <n>` | 取得最大イベント数 | `1000` |
 | `--filter <pattern>` | CloudWatch フィルタパターン直接指定 | — |
 | `--show-ignored` | config `ignore` に一致する既知パターンも表示する | 除外 |
+| `--save <path>` | メタ情報付きインシデントレポート (Markdown) を指定パスに保存。stdout 出力は通常どおり | — |
 | `--profile <name>` | AWS profile | — |
 | `--region <region>` | AWS region | — |
 

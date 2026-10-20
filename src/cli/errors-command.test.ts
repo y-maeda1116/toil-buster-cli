@@ -514,3 +514,64 @@ describe("runErrorsCommand: ignore", () => {
     expect(io.err.join("")).toContain("ignore パターンの正規表現が不正です");
   });
 });
+
+describe("runErrorsCommand: --save", () => {
+  const saveDeps = (
+    provider: Partial<LogProvider>,
+    env: NodeJS.ProcessEnv = { HOME: "/tmp" }
+  ): { deps: Partial<RunDeps>; saved: { path: string; content: string }[] } => {
+    const saved: { path: string; content: string }[] = [];
+    return {
+      saved,
+      deps: {
+        ...makeDeps(provider, env),
+        writeFile: (path: string, content: string) => saved.push({ path, content }),
+      },
+    };
+  };
+
+  it("--save でメタ情報付きレポートをファイルに書き、stdout には通常出力する", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const io = makeIo();
+    const { deps, saved } = saveDeps({ fetch });
+    const code = await runErrorsCommand(["errors", "g", "--save", "report.md"], io, deps);
+    expect(code).toBe(0);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]!.path).toBe("report.md");
+    expect(saved[0]!.content).toContain("# Toil Buster Report");
+    expect(saved[0]!.content).toContain("# Log Summary: g");
+    expect(io.out.join("")).toContain("Log Group: g");
+  });
+
+  it("--save 単独指定でもレポートは Markdown で書かれる", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const io = makeIo();
+    const { deps, saved } = saveDeps({ fetch });
+    const code = await runErrorsCommand(
+      ["errors", "g", "--format", "json", "--save", "report.md"],
+      io,
+      deps
+    );
+    expect(code).toBe(0);
+    expect(saved[0]!.content).toContain("# Toil Buster Report");
+    expect(io.out.join("")).toContain("[");
+  });
+
+  it("保存先ディレクトリがなければエラーで終了する", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const io = makeIo();
+    const { deps } = saveDeps({ fetch });
+    const code = await runErrorsCommand(
+      ["errors", "g", "--save", "/nonexistent-tb-dir/report.md"],
+      io,
+      {
+        ...deps,
+        writeFile: () => {
+          throw new Error("ENOENT");
+        },
+      }
+    );
+    expect(code).toBe(1);
+    expect(io.err.join("")).toContain("レポートの保存に失敗しました");
+  });
+});
