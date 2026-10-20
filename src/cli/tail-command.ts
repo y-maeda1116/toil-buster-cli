@@ -113,6 +113,8 @@ export async function runTailCommand(
     env: deps?.env ?? process.env,
     now: deps?.now ?? (() => new Date()),
     writeFile: deps?.writeFile ?? (() => {}),
+    sleep: deps?.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
+    clearScreen: deps?.clearScreen ?? (() => {}),
   };
   return execute(parsed.group, parsed.options, io, fullDeps);
 }
