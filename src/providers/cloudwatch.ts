@@ -5,6 +5,7 @@ import type {
   FilterLogEventsCommandOutput,
 } from "@aws-sdk/client-cloudwatch-logs";
 import type { FetchResult, LogProvider, LogQuery } from "./types.js";
+import { MAX_GROUPS } from "./types.js";
 
 // CloudWatchLogsClient の send は Command インスタンスを受け取る。
 // FilterLogEvents / DescribeLogGroups の両方を扱うためパラメータは never:
@@ -34,7 +35,8 @@ export class CloudWatchProvider implements LogProvider {
         if (g.logGroupName !== undefined) names.push(g.logGroupName);
       }
       nextToken = output.nextToken;
-    } while (nextToken !== undefined);
+      // 上限を超えたら残りのページを取りに行かない (リソース上限の早期打ち切り)。
+    } while (nextToken !== undefined && names.length <= MAX_GROUPS);
     return names;
   }
 

@@ -3,7 +3,9 @@ export interface GroupSource {
 }
 
 // 展開しすぎて大量の順次 fetch に落ちないよう上限を設ける。
-export const MAX_GROUPS = 20;
+import { MAX_GROUPS } from "../providers/types.js";
+// 既存 import 経路の互換用に再エクスポート (providers と core で同一の上限を共有)。
+export { MAX_GROUPS };
 
 /**
  * カンマ区切り + 末尾ワイルドカード (prefix 一致) のロググループ式を解決する。
@@ -39,9 +41,9 @@ export async function resolveGroupExpressions(
         `ロググループが見つかりません: "${item}" (prefix "${prefix}" に一致するグループがありません)`
       );
     }
-    if (names.length > MAX_GROUPS) {
+    if (resolved.length + names.length > MAX_GROUPS) {
       throw new Error(
-        `ロググループの展開数が上限 (${MAX_GROUPS}) を超えました: ${names.length} 件。パターンを狭めてください`
+        `ロググループの展開数が上限 (${MAX_GROUPS}) を超えました: ${resolved.length + names.length} 件。パターンを狭めてください`
       );
     }
     resolved.push(...names);
