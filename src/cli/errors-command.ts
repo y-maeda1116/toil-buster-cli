@@ -17,6 +17,7 @@ import { renderTable } from "../render/table.js";
 import { VERSION } from "../version.js";
 import { buildFilterPattern } from "./filter-pattern.js";
 import { resolveTimeWindow } from "../core/time-window.js";
+import { liveLoop } from "./watch.js";
 
 export interface CliIo {
   stdout(text: string): void;
@@ -29,6 +30,10 @@ export interface RunDeps {
   now(): Date;
   /** --save 用のファイル書き込み (テストで注入する)。 */
   writeFile(path: string, content: string): void;
+  /** --live の監視間隔の待機 (テストで注入する)。 */
+  sleep(ms: number): Promise<void>;
+  /** --live の画面クリア (テストで注入する)。 */
+  clearScreen(): void;
 }
 
 interface ErrorsOptions {
@@ -43,6 +48,8 @@ interface ErrorsOptions {
   limit?: string;
   filter?: string;
   save?: string;
+  live?: string;
+  count?: string;
   showIgnored?: boolean;
   profile?: string;
   region?: string;
@@ -110,10 +117,6 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
         "--time と --since/--until は同時に指定できません。絶対時刻は --since/--until を使ってください"
       );
     }
-    const window = resolveTimeWindow(
-      { time: timeSpec, since: o.since, until: o.until },
-      deps.now()
-    );
     const bucketMs = o.bucket === undefined ? undefined : parseDuration(o.bucket);
     const levelSpec = o.level ?? DEFAULTS.level;
     const top = positiveInt("--top", o.top ?? config.defaults.top, DEFAULTS.top);
@@ -128,66 +131,93 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
     // --show-ignored は既知パターンも確認するモード。比較は表示 groups 基準で行う。
     const ignore = { specs: parseIgnoreSpecs(config.ignore), showIgnored: o.showIgnored };
 
-    const results: SummaryResult[] = [];
-    for (const logGroup of groups) {
-      const { events, truncated } = await provider.fetch({
-        logGroup,
-        startTime: window.start,
-        endTime: window.end,
-        filterPattern,
-        limit,
-      });
-
-      const summary = aggregateEvents(
-        logGroup,
-        window.start,
-        window.end,
-        events,
-        truncated,
-        bucketMs,
-        ignore
+    // --live の各 tick で窓を now から再計算するため、collect の中で解決する
+    // (--time なら常に「直近 --time」、--since/--until は固定窓のまま)。
+    const collectResults = async (): Promise<SummaryResult[]> => {
+      const window = resolveTimeWindow(
+        { time: timeSpec, since: o.since, until: o.until },
+        deps.now()
       );
+      const results: SummaryResult[] = [];
+      for (const logGroup of groups) {
+        const { events, truncated } = await provider.fetch({
+          logGroup,
+          startTime: window.start,
+          endTime: window.end,
+          filterPattern,
+          limit,
+        });
 
-      if (compareMs === undefined) {
-        results.push(summary);
-        continue;
+        const summary = aggregateEvents(
+          logGroup,
+          window.start,
+          window.end,
+          events,
+          truncated,
+          bucketMs,
+          ignore
+        );
+
+        if (compareMs === undefined) {
+          results.push(summary);
+          continue;
+        }
+        // 比較窓は現在窓の直前に隣接する同 filterPattern / limit のクエリ。
+        const compareEnd = window.start;
+        const compareStart = new Date(compareEnd.getTime() - compareMs);
+        const prev = await provider.fetch({
+          logGroup,
+          startTime: compareStart,
+          endTime: compareEnd,
+          filterPattern,
+          limit,
+        });
+        const prevSummary = aggregateEvents(
+          logGroup,
+          compareStart,
+          compareEnd,
+          prev.events,
+          prev.truncated,
+          undefined,
+          ignore
+        );
+        results.push({
+          ...summary,
+          comparison: {
+            timeWindow: { start: compareStart, end: compareEnd },
+            totalEvents: prevSummary.totalEvents,
+            groups: compareGroups(summary.groups, prevSummary.groups),
+          },
+        });
       }
-      // 比較窓は現在窓の直前に隣接する同 filterPattern / limit のクエリ。
-      const compareEnd = window.start;
-      const compareStart = new Date(compareEnd.getTime() - compareMs);
-      const prev = await provider.fetch({
-        logGroup,
-        startTime: compareStart,
-        endTime: compareEnd,
-        filterPattern,
-        limit,
-      });
-      const prevSummary = aggregateEvents(
-        logGroup,
-        compareStart,
-        compareEnd,
-        prev.events,
-        prev.truncated,
-        undefined,
-        ignore
-      );
-      results.push({
-        ...summary,
-        comparison: {
-          timeWindow: { start: compareStart, end: compareEnd },
-          totalEvents: prevSummary.totalEvents,
-          groups: compareGroups(summary.groups, prevSummary.groups),
-        },
-      });
-    }
+      return results;
+    };
 
-    io.stdout(renderResults(results, format, top));
+    let reportResults: SummaryResult[] = [];
+    if (o.live === undefined) {
+      reportResults = await collectResults();
+      io.stdout(renderResults(reportResults, format, top));
+    } else {
+      // 監視モード: --live 間隔で再取得して画面をクリアし再描画する。
+      // 終了は Ctrl+C (プロセス既定) または --count 指定の回数。
+      const intervalMs = parseDuration(o.live);
+      const liveCount = o.count === undefined ? undefined : positiveInt("--count", o.count, 1);
+      await liveLoop(
+        { intervalMs, count: liveCount },
+        async () => {
+          const results = await collectResults();
+          const header = `監視中: ${o.live}間隔で更新 (Ctrl+C で終了)  最終更新: ${deps.now().toISOString()}\n\n`;
+          io.stdout(header + renderResults(results, format, top));
+        },
+        { sleep: deps.sleep, clearScreen: deps.clearScreen }
+      );
+    }
     if (o.save !== undefined) {
       try {
         // レポートは --format と独立に Markdown で書き、top 制限もかけない (報告書は全件)。
         deps.writeFile(
           o.save,
-          renderReport(results, {
+          renderReport(reportResults, {
             generatedAt: deps.now(),
             filterPattern,
             limit,
@@ -249,6 +279,8 @@ export async function runErrorsCommand(
     .option("--limit <n>", "取得最大イベント数。デフォルト 1000")
     .option("--filter <pattern>", "CloudWatch フィルタパターン直接指定")
     .option("--save <path>", "インシデントレポート (Markdown) を指定パスに保存する")
+    .option("--live <dur>", "監視モード: 指定間隔で再取得して再描画 (例: 30s)")
+    .option("--count <n>", "--live の繰り返し回数。省略時は Ctrl+C まで")
     .option("--show-ignored", "config ignore に一致するパターンも表示する")
     .option("--profile <name>", "AWS profile")
     .option("--region <region>", "AWS region")
@@ -267,6 +299,8 @@ export async function runErrorsCommand(
     env: deps?.env ?? process.env,
     now: deps?.now ?? (() => new Date()),
     writeFile: deps?.writeFile ?? ((path, content) => writeFileSync(path, content, "utf8")),
+    sleep: deps?.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
+    clearScreen: deps?.clearScreen ?? (() => process.stdout.write("\x1b[2J\x1b[H")),
   };
   return execute(parsed.group, parsed.options, io, fullDeps);
 }

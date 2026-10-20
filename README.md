@@ -48,6 +48,12 @@ tb tail prod-api --last 10m --lines 100
 
 # 正規表現に一致した行と前後 3 行の文脈を表示
 tb show prod-api --pattern "TimeoutError" --context 3
+
+# デプロイ後の経過監視: 30 秒間隔で再取得して再描画 (Ctrl+C で終了)
+tb errors prod-api --time 30m --live 30s
+
+# 10 回だけ監視して自動終了
+tb errors prod-api --live 1m --count 10
 ```
 
 ### ロググループの指定
@@ -89,6 +95,8 @@ tb show prod-api --pattern "TimeoutError" --context 3
 | `--filter <pattern>` | CloudWatch フィルタパターン直接指定 | — |
 | `--show-ignored` | config `ignore` に一致する既知パターンも表示する | 除外 |
 | `--save <path>` | メタ情報付きインシデントレポート (Markdown) を指定パスに保存。stdout 出力は通常どおり | — |
+| `--live <dur>` | 監視モード: 指定間隔で再取得して画面をクリアし再描画。Ctrl+C で終了 | — |
+| `--count <n>` | `--live` の繰り返し回数。省略時は Ctrl+C まで | — |
 | `--profile <name>` | AWS profile | — |
 | `--region <region>` | AWS region | — |
 
