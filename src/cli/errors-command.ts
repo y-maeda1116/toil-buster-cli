@@ -1,4 +1,5 @@
 import { CloudWatchLogsClient } from "@aws-sdk/client-cloudwatch-logs";
+import { writeFileSync } from "node:fs";
 import { Command, CommanderError } from "commander";
 import { aggregateEvents } from "../core/aggregate.js";
 import type { SummaryResult } from "../core/aggregate.js";
@@ -11,6 +12,7 @@ import { CloudWatchProvider } from "../providers/cloudwatch.js";
 import type { LogProvider } from "../providers/types.js";
 import { renderJson, toJsonValue } from "../render/json.js";
 import { renderMarkdown } from "../render/markdown.js";
+import { renderReport } from "../render/report.js";
 import { renderTable } from "../render/table.js";
 import { VERSION } from "../version.js";
 import { buildFilterPattern } from "./filter-pattern.js";
@@ -25,6 +27,8 @@ export interface RunDeps {
   providerFactory(opts: { region?: string; profile?: string }): LogProvider;
   env: NodeJS.ProcessEnv;
   now(): Date;
+  /** --save 用のファイル書き込み (テストで注入する)。 */
+  writeFile(path: string, content: string): void;
 }
 
 interface ErrorsOptions {
@@ -38,6 +42,7 @@ interface ErrorsOptions {
   top?: string;
   limit?: string;
   filter?: string;
+  save?: string;
   showIgnored?: boolean;
   profile?: string;
   region?: string;
@@ -177,6 +182,23 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
     }
 
     io.stdout(renderResults(results, format, top));
+    if (o.save !== undefined) {
+      try {
+        // レポートは --format と独立に Markdown で書き、top 制限もかけない (報告書は全件)。
+        deps.writeFile(
+          o.save,
+          renderReport(results, {
+            generatedAt: deps.now(),
+            filterPattern,
+            limit,
+          })
+        );
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        throw new Error(`レポートの保存に失敗しました: ${o.save} (${message})`, { cause });
+      }
+      io.stderr(`レポートを保存しました: ${o.save}`);
+    }
     return 0;
   } catch (err) {
     io.stderr(formatError(err, format));
@@ -226,6 +248,7 @@ export async function runErrorsCommand(
     .option("--top <n>", "頻度ランキング上位件数。デフォルト 20")
     .option("--limit <n>", "取得最大イベント数。デフォルト 1000")
     .option("--filter <pattern>", "CloudWatch フィルタパターン直接指定")
+    .option("--save <path>", "インシデントレポート (Markdown) を指定パスに保存する")
     .option("--show-ignored", "config ignore に一致するパターンも表示する")
     .option("--profile <name>", "AWS profile")
     .option("--region <region>", "AWS region")
@@ -243,6 +266,7 @@ export async function runErrorsCommand(
     providerFactory: deps?.providerFactory ?? defaultProviderFactory,
     env: deps?.env ?? process.env,
     now: deps?.now ?? (() => new Date()),
+    writeFile: deps?.writeFile ?? ((path, content) => writeFileSync(path, content, "utf8")),
   };
   return execute(parsed.group, parsed.options, io, fullDeps);
 }
