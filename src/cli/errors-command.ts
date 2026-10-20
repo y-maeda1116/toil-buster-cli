@@ -9,6 +9,7 @@ import { resolveGroupExpressions } from "../core/resolve-groups.js";
 import { parseIgnoreSpecs } from "../core/ignore.js";
 import { loadConfig } from "../config/load.js";
 import { CloudWatchProvider } from "../providers/cloudwatch.js";
+import type { InsightsClient } from "../providers/insights.js";
 import type { LogProvider } from "../providers/types.js";
 import { renderJson, toJsonValue } from "../render/json.js";
 import { renderMarkdown } from "../render/markdown.js";
@@ -34,6 +35,8 @@ export interface RunDeps {
   sleep(ms: number): Promise<void>;
   /** --live の画面クリア (テストで注入する)。 */
   clearScreen(): void;
+  /** insights コマンド用の Insights クライアント生成 (テストで注入する)。tail/show では未使用。 */
+  insightsFactory?(opts: { region?: string; profile?: string }): InsightsClient;
 }
 
 interface ErrorsOptions {

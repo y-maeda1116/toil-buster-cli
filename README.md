@@ -49,6 +49,12 @@ tb tail prod-api --last 10m --lines 100
 # 正規表現に一致した行と前後 3 行の文脈を表示
 tb show prod-api --pattern "TimeoutError" --context 3
 
+# CloudWatch Logs Insights クエリで 1 分ごとのエラー件数を集計
+tb insights prod-api --time 2h
+
+# Insights クエリを直接指定して自由に集計
+tb insights prod-api --time 1h --query 'stats count() as count by @logStream | sort count desc'
+
 # デプロイ後の経過監視: 30 秒間隔で再取得して再描画 (Ctrl+C で終了)
 tb errors prod-api --time 30m --live 30s
 
@@ -81,6 +87,18 @@ tb errors prod-api --time 10m --fail-over 100 --format json
 
 どちらも `errors` と同じロググループ指定（エイリアス / 完全名 / 末尾ワイルドカード）が使え、
 時刻は UTC ISO 8601 で出力します。
+
+### Insights クエリ (`insights`)
+
+CloudWatch Logs Insights (StartQuery / GetQueryResults) でサーバーサイド集計を行うサブコマンドです。
+FetchLogEvents より大量のログを効率よく集計したいときに使います。
+
+- **`tb insights <group>`**: 既定クエリ（`filter @message like /ERROR/ | stats count() as count by bin(1m) as bucket | sort bucket asc`）
+  で 1 分ごとの件数をテーブル表示。`--level WARN,ERROR` で対象レベルを変更（OR 条件で filter）
+- **`--query <queryString>`**: Insights クエリ構文で直接指定（既定クエリを上書き）。複数グループは
+  `errors` と同じ指定（エイリアス / 完全名 / 末尾ワイルドカード）が使え、すべて 1 クエリに渡ります
+- クエリは `--interval`（デフォルト 1s）ごとにポーリングし、`--timeout`（デフォルト 60s）以内に
+  完了しなければエラー終了します。`--format json` で行オブジェクトの配列として出力
 
 ### オプション
 
