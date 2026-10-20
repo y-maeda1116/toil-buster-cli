@@ -10,7 +10,7 @@ describe("tb CLI (E2E)", () => {
   it("--help は exit 0 で usage を出す", () => {
     const res = runCli(["--help"]);
     expect(res.status).toBe(0);
-    expect(res.stdout).toContain("errors <group>");
+    expect(res.stdout).toContain("errors [group]");
   });
 
   it("--version は 0.1.0", () => {
@@ -34,7 +34,7 @@ describe("tb CLI (E2E)", () => {
   it("tail --help は exit 0 で usage を出す", () => {
     const res = runCli(["tail", "--help"]);
     expect(res.status).toBe(0);
-    expect(res.stdout).toContain("tail <group>");
+    expect(res.stdout).toContain("tail [group]");
   });
 
   it("show の --pattern 未指定は exit 0 以外", () => {

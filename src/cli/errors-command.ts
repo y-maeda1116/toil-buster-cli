@@ -18,6 +18,7 @@ import { VERSION } from "../version.js";
 import { buildFilterPattern } from "./filter-pattern.js";
 import { resolveTimeWindow } from "../core/time-window.js";
 import { liveLoop, LiveInterrupted } from "./watch.js";
+import { selectTargetGroup } from "./select-target.js";
 
 export interface CliIo {
   stdout(text: string): void;
@@ -36,6 +37,10 @@ export interface RunDeps {
   clearScreen(): void;
   /** insights コマンド用の Insights クライアント生成 (テストで注入する)。tail/show では未使用。 */
   insightsFactory?(opts: { region?: string; profile?: string }): InsightsClient;
+  /** グループ名省略時の対話選択 UI (テストで注入する)。 */
+  selectGroup?(choices: readonly string[]): Promise<string>;
+  /** stdin が TTY かどうか (テストで注入する)。 */
+  isTTY?(): boolean;
 }
 
 interface ErrorsOptions {
@@ -104,7 +109,12 @@ function renderResults(results: SummaryResult[], format: string, top: number): s
   return results.map((r) => renderer(r, top)).join("\n");
 }
 
-async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps): Promise<number> {
+async function execute(
+  group: string | undefined,
+  o: ErrorsOptions,
+  io: CliIo,
+  deps: RunDeps
+): Promise<number> {
   // loadConfig が throw しても --format json のエラーを構造化 JSON にできるよう、
   // format は try の前における値で初期化する (妥当性検証は try 内)。
   let format: string = o.format ?? DEFAULTS.format;
@@ -130,7 +140,9 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
     const filterPattern = o.filter ?? buildFilterPattern(levelSpec.split(","));
     const compareMs = o.compare === undefined ? undefined : parseDuration(o.compare);
     const provider = deps.providerFactory({ region, profile });
-    const groups = await resolveGroupExpressions(group, config.aliases, provider);
+    // グループ名省略時は一覧からの対話選択 (非 TTY ではエラー)。
+    const target = await selectTargetGroup(group, provider, deps);
+    const groups = await resolveGroupExpressions(target, config.aliases, provider);
     // --show-ignored は既知パターンも確認するモード。比較は表示 groups 基準で行う。
     const ignore = { specs: parseIgnoreSpecs(config.ignore), showIgnored: o.showIgnored };
 
@@ -282,11 +294,11 @@ export async function runErrorsCommand(
   program.configureHelp({
     subcommandTerm: (cmd) => `${cmd.name()} ${cmd.usage()}`,
   });
-  let parsed: { group: string; options: ErrorsOptions } | undefined;
+  let parsed: { group: string | undefined; options: ErrorsOptions } | undefined;
   program
-    .command("errors <group>")
-    .usage("<group>")
-    .description("指定期間のエラーログを抽出して統計表示")
+    .command("errors [group]")
+    .usage("[group]")
+    .description("指定期間のエラーログを抽出して統計表示 (グループ省略時は対話選択)")
     .option("-t, --time <dur>", "時間窓 (10m / 1h / 2d)。デフォルト 15m")
     .option("--since <datetime>", "開始時刻 (ISO 8601。例: 2026-10-18T14:00)。--time と併用不可")
     .option("--until <datetime>", "終了時刻 (ISO 8601)。省略時は現在時刻")

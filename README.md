@@ -43,6 +43,9 @@ tb errors prod-api --time 1h --show-ignored
 # インシデントレポートとして Markdown 保存 (実行時刻・フィルタ条件を含む)
 tb errors prod-api --time 2h --save incident-20261019.md
 
+# グループ名を省略すると fzf 風に一覧から対話選択 (ターミナルのみ)
+tb errors
+
 # 直近の生ログを時系列順に表示
 tb tail prod-api --last 10m --lines 100
 
@@ -67,12 +70,16 @@ tb errors prod-api --time 10m --fail-over 100 --format json
 
 ### ロググループの指定
 
-`<group>` には次のいずれかを指定できます（カンマ区切りで併用可、重複は自動排除）:
+各サブコマンドの `<group>` には次のいずれかを指定できます（カンマ区切りで併用可、重複は自動排除）:
 
 - **エイリアス**: 設定ファイルの `aliases` で解決（例: `prod-api`）
 - **完全名**: `/aws/lambda/prod-api` のようなロググループ名そのもの
 - **末尾ワイルドカード**: `prod-api-*` のように末尾 `*` で prefix 一致するグループを
   DescribeLogGroups で展開（展開数は最大 20 グループ。0 件の場合はエラーで終了）
+
+**グループ名を省略すると**、ターミナル (TTY) からは DescribeLogGroups の一覧を使った
+fzf 風インクリメンタル検索で選択できます（入力で絞り込み / ↑↓ で移動 / Enter で確定 / Esc で中断）。
+CI やスクリプトなど非対話環境では省略時にエラーになるため、必ず明示的に指定してください。
 
 複数グループを指定した場合、各グループごとに fetch → 集計して出力します。
 `--format table` / `md` はグループごとのセクション連結、`--format json` は結果の配列になります。
