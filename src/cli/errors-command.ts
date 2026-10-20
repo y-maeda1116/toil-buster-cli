@@ -17,7 +17,7 @@ import { renderTable } from "../render/table.js";
 import { VERSION } from "../version.js";
 import { buildFilterPattern } from "./filter-pattern.js";
 import { resolveTimeWindow } from "../core/time-window.js";
-import { liveLoop } from "./watch.js";
+import { liveLoop, LiveInterrupted } from "./watch.js";
 
 export interface CliIo {
   stdout(text: string): void;
@@ -50,6 +50,7 @@ interface ErrorsOptions {
   save?: string;
   live?: string;
   count?: string;
+  failOver?: string;
   showIgnored?: boolean;
   profile?: string;
   region?: string;
@@ -194,9 +195,17 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
     };
 
     let reportResults: SummaryResult[] = [];
+    let breached: SummaryResult | undefined;
+    // totalEvents (ignore 適用前の取得イベント数) が閾値を超えたら exit 2。
+    // 終了コードは 0=正常 / 1=コマンドエラー / 2=閾値超過 で CI から区別できる。
+    const threshold =
+      o.failOver === undefined ? undefined : positiveInt("--fail-over", o.failOver, 1);
+    const findBreach = (results: SummaryResult[]): SummaryResult | undefined =>
+      threshold === undefined ? undefined : results.find((r) => r.totalEvents > threshold);
     if (o.live === undefined) {
       reportResults = await collectResults();
       io.stdout(renderResults(reportResults, format, top));
+      breached = findBreach(reportResults);
     } else {
       // 監視モード: --live 間隔で再取得して画面をクリアし再描画する。
       // 終了は Ctrl+C (プロセス既定) または --count 指定の回数。
@@ -208,6 +217,11 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
           const results = await collectResults();
           const header = `監視中: ${o.live}間隔で更新 (Ctrl+C で終了)  最終更新: ${deps.now().toISOString()}\n\n`;
           io.stdout(header + renderResults(results, format, top));
+          const hit = findBreach(results);
+          if (hit !== undefined) {
+            breached = hit;
+            throw new LiveInterrupted(); // 超過したら次の sleep を待たず中断
+          }
         },
         { sleep: deps.sleep, clearScreen: deps.clearScreen }
       );
@@ -228,6 +242,12 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
         throw new Error(`レポートの保存に失敗しました: ${o.save} (${message})`, { cause });
       }
       io.stderr(`レポートを保存しました: ${o.save}`);
+    }
+    if (breached !== undefined) {
+      io.stderr(
+        `エラー件数が閾値 (${threshold}) を超えました: ${breached.logGroup} = ${breached.totalEvents} 件\n`
+      );
+      return 2;
     }
     return 0;
   } catch (err) {
@@ -281,6 +301,7 @@ export async function runErrorsCommand(
     .option("--save <path>", "インシデントレポート (Markdown) を指定パスに保存する")
     .option("--live <dur>", "監視モード: 指定間隔で再取得して再描画 (例: 30s)")
     .option("--count <n>", "--live の繰り返し回数。省略時は Ctrl+C まで")
+    .option("--fail-over <n>", "エラー件数がこの件数を超えたら exit 2 (CI / cron 向け)")
     .option("--show-ignored", "config ignore に一致するパターンも表示する")
     .option("--profile <name>", "AWS profile")
     .option("--region <region>", "AWS region")
