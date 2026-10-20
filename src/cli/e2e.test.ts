@@ -30,4 +30,15 @@ describe("tb CLI (E2E)", () => {
     expect(res.status).not.toBe(0);
     expect(res.stderr).toContain("error");
   });
+
+  it("tail --help は exit 0 で usage を出す", () => {
+    const res = runCli(["tail", "--help"]);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain("tail <group>");
+  });
+
+  it("show の --pattern 未指定は exit 0 以外", () => {
+    const res = runCli(["show", "some-group"]);
+    expect(res.status).not.toBe(0);
+  });
 });

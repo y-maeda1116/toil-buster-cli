@@ -42,6 +42,12 @@ tb errors prod-api --time 1h --show-ignored
 
 # インシデントレポートとして Markdown 保存 (実行時刻・フィルタ条件を含む)
 tb errors prod-api --time 2h --save incident-20261019.md
+
+# 直近の生ログを時系列順に表示
+tb tail prod-api --last 10m --lines 100
+
+# 正規表現に一致した行と前後 3 行の文脈を表示
+tb show prod-api --pattern "TimeoutError" --context 3
 ```
 
 ### ロググループの指定
@@ -55,6 +61,17 @@ tb errors prod-api --time 2h --save incident-20261019.md
 
 複数グループを指定した場合、各グループごとに fetch → 集計して出力します。
 `--format table` / `md` はグループごとのセクション連結、`--format json` は結果の配列になります。
+
+### 生ログの調査 (`tail` / `show`)
+
+集計 (`errors`) → 個別調査を CLI 内で完結させるサブコマンドです。
+
+- **`tb tail <group>`**: 直近の生ログを時系列昇順で表示（`--last` 遡る窓、`--lines` 最大行数）
+- **`tb show <group> --pattern <regex>`**: 正規表現に一致した行と前後の文脈を表示
+  （`--context` 文脈行数、マッチ行には `*` を付ける。複数マッチの文脈が重なる場合は 1 つの区間にマージ）
+
+どちらも `errors` と同じロググループ指定（エイリアス / 完全名 / 末尾ワイルドカード）が使え、
+時刻は UTC ISO 8601 で出力します。
 
 ### オプション
 
