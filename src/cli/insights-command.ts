@@ -1,4 +1,3 @@
-import { CloudWatchLogsClient } from "@aws-sdk/client-cloudwatch-logs";
 import chalk from "chalk";
 import Table from "cli-table3";
 import { Command, CommanderError } from "commander";
@@ -6,19 +5,10 @@ import { loadConfig } from "../config/load.js";
 import { parseDuration } from "../core/duration.js";
 import { resolveGroupExpressions } from "../core/resolve-groups.js";
 import { resolveTimeWindow } from "../core/time-window.js";
-import { CloudWatchProvider } from "../providers/cloudwatch.js";
-import { InsightsProvider } from "../providers/insights.js";
-import type { InsightsQuerySpec, InsightsRow } from "../providers/insights.js";
-import type { LogProvider } from "../providers/types.js";
+import type { InsightsRow } from "../providers/insights.js";
 import { VERSION } from "../version.js";
 import type { CliIo, RunDeps } from "./errors-command.js";
-
-/** テストで注入できるよう InsightsProvider から取り出した構造のインターフェイス。 */
-export interface InsightsClient {
-  startQuery(spec: InsightsQuerySpec): Promise<string>;
-  status(queryId: string): Promise<string>;
-  results(queryId: string): Promise<InsightsRow[]>;
-}
+import { cloudWatchProviderFactory, insightsProviderFactory } from "../providers/factory.js";
 
 interface InsightsOptions {
   time?: string;
@@ -81,16 +71,6 @@ function renderTable(rows: readonly InsightsRow[]): string {
   return `${table.toString()}\n`;
 }
 
-const defaultProviderFactory = (opts: { region?: string; profile?: string }): LogProvider => {
-  const client = new CloudWatchLogsClient(opts);
-  return new CloudWatchProvider(client.send.bind(client));
-};
-
-const defaultInsightsFactory = (opts: { region?: string; profile?: string }): InsightsClient => {
-  const client = new CloudWatchLogsClient(opts);
-  return new InsightsProvider(client.send.bind(client));
-};
-
 async function execute(
   group: string,
   o: InsightsOptions,
@@ -118,7 +98,7 @@ async function execute(
       profile: o.profile ?? config.defaults.profile,
     });
     const groups = await resolveGroupExpressions(group, config.aliases, provider);
-    const client = (deps.insightsFactory ?? defaultInsightsFactory)({
+    const client = (deps.insightsFactory ?? insightsProviderFactory)({
       region: o.region ?? config.defaults.region,
       profile: o.profile ?? config.defaults.profile,
     });
@@ -195,8 +175,8 @@ export async function runInsightsCommand(
   }
   if (parsed === undefined) return 0;
   const fullDeps: RunDeps = {
-    providerFactory: deps?.providerFactory ?? defaultProviderFactory,
-    insightsFactory: deps?.insightsFactory ?? defaultInsightsFactory,
+    providerFactory: deps?.providerFactory ?? cloudWatchProviderFactory,
+    insightsFactory: deps?.insightsFactory ?? insightsProviderFactory,
     env: deps?.env ?? process.env,
     now: deps?.now ?? (() => new Date()),
     writeFile: deps?.writeFile ?? (() => {}),
