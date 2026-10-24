@@ -1,4 +1,3 @@
-import { CloudWatchLogsClient } from "@aws-sdk/client-cloudwatch-logs";
 import { writeFileSync } from "node:fs";
 import { Command, CommanderError } from "commander";
 import { aggregateEvents } from "../core/aggregate.js";
@@ -8,7 +7,8 @@ import { compareGroups } from "../core/compare.js";
 import { resolveGroupExpressions } from "../core/resolve-groups.js";
 import { parseIgnoreSpecs } from "../core/ignore.js";
 import { loadConfig } from "../config/load.js";
-import { CloudWatchProvider } from "../providers/cloudwatch.js";
+import { cloudWatchProviderFactory } from "../providers/factory.js";
+import type { InsightsClient } from "../providers/insights.js";
 import type { LogProvider } from "../providers/types.js";
 import { renderJson, toJsonValue } from "../render/json.js";
 import { renderMarkdown } from "../render/markdown.js";
@@ -34,6 +34,8 @@ export interface RunDeps {
   sleep(ms: number): Promise<void>;
   /** --live の画面クリア (テストで注入する)。 */
   clearScreen(): void;
+  /** insights コマンド用の Insights クライアント生成 (テストで注入する)。tail/show では未使用。 */
+  insightsFactory?(opts: { region?: string; profile?: string }): InsightsClient;
 }
 
 interface ErrorsOptions {
@@ -258,10 +260,7 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
 
 // CloudWatchProvider の Sender 型は callable (client.send) なので、
 // client オブジェクトではなく send を bind した関数を渡す (Task 7 の ruling)。
-const defaultProviderFactory = (opts: { region?: string; profile?: string }): LogProvider => {
-  const client = new CloudWatchLogsClient(opts);
-  return new CloudWatchProvider(client.send.bind(client));
-};
+// 既定ファクトリは src/providers/factory.ts に切り出した。
 
 export async function runErrorsCommand(
   argv: string[],
@@ -316,7 +315,7 @@ export async function runErrorsCommand(
   }
   if (parsed === undefined) return 0; // --help / --version
   const fullDeps: RunDeps = {
-    providerFactory: deps?.providerFactory ?? defaultProviderFactory,
+    providerFactory: deps?.providerFactory ?? cloudWatchProviderFactory,
     env: deps?.env ?? process.env,
     now: deps?.now ?? (() => new Date()),
     writeFile: deps?.writeFile ?? ((path, content) => writeFileSync(path, content, "utf8")),
