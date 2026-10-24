@@ -50,6 +50,18 @@ describe("resolveGroupExpressions", () => {
     await expect(resolveGroupExpressions("g-*", {}, source(many))).rejects.toThrow(/上限/);
   });
 
+  it("複数ワイルドカードの累積展開数にも上限を適用する", async () => {
+    // 各展開は単独では上限以下でも、合計が上限を超えたらエラーにする。
+    // a 側 MAX_GROUPS - 4 件 + b 側 5 件 = 上限 + 1 件。
+    const aNames = Array.from({ length: MAX_GROUPS - 4 }, (_, i) => `/a-${i}`);
+    const src = {
+      listGroupNames: vi.fn(async (prefix: string) =>
+        prefix === "a-" ? aNames : aNames.slice(0, 5)
+      ),
+    };
+    await expect(resolveGroupExpressions("a-*,b-*", {}, src)).rejects.toThrow(/上限/);
+  });
+
   it("空白はトリミングされる", async () => {
     const result = await resolveGroupExpressions("/a, /b", {}, source([]));
     expect(result).toEqual(["/a", "/b"]);

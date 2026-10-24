@@ -16,6 +16,9 @@ export interface FetchResult {
   truncated: boolean;
 }
 
+/** ワイルドカード展開で扱うロググループ数の上限 (providers と core で共有)。 */
+export const MAX_GROUPS = 20;
+
 export interface LogProvider {
   fetch(query: LogQuery): Promise<FetchResult>;
   /** 末尾ワイルドカード展開用の prefix 検索 (DescribeLogGroups)。 */

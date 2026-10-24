@@ -124,4 +124,24 @@ describe("CloudWatchProvider.listGroupNames", () => {
     expect(send).toHaveBeenCalledTimes(2);
     expect(send.mock.calls[1]![0].input).toMatchObject({ nextToken: "t1" });
   });
+
+  it("収集数が MAX_GROUPS を超えたら残りのページを取りに行かない", async () => {
+    // 1 ページ 15 件 × 3 ページを用意し、2 ページ目で 30 件 (> 上限) に達したら打ち切る。
+    const pageOf = (prefix: string) => ({
+      $metadata: {},
+      logGroups: Array.from({ length: 15 }, (_, i) => ({ logGroupName: `/${prefix}${i}` })),
+      nextToken: undefined,
+    });
+    const send = vi
+      .fn<Send>()
+      .mockImplementationOnce((() =>
+        Promise.resolve({ ...pageOf("p1"), nextToken: "t1" })) as never)
+      .mockImplementationOnce((() =>
+        Promise.resolve({ ...pageOf("p2"), nextToken: "t2" })) as never)
+      .mockImplementationOnce((() => Promise.resolve(pageOf("p3"))) as never);
+    const provider = new CloudWatchProvider(send, { retryDelayMs: 0 });
+    const names = await provider.listGroupNames("p");
+    expect(names).toHaveLength(30);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
 });
