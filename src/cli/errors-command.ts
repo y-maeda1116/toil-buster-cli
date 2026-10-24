@@ -8,6 +8,8 @@ import { resolveGroupExpressions } from "../core/resolve-groups.js";
 import { parseIgnoreSpecs } from "../core/ignore.js";
 import { loadConfig } from "../config/load.js";
 import { providerFor } from "../providers/factory.js";
+import { AnthropicSummarizer } from "../llm/summarizer.js";
+import type { AiSummarizer } from "../llm/summarizer.js";
 import type { InsightsClient } from "../providers/insights.js";
 import type { LogProvider } from "../providers/types.js";
 import { renderJson, toJsonValue } from "../render/json.js";
@@ -37,6 +39,8 @@ export interface RunDeps {
   clearScreen(): void;
   /** insights コマンド用の Insights クライアント生成 (テストで注入する)。tail/show では未使用。 */
   insightsFactory?(opts: { region?: string; profile?: string }): InsightsClient;
+  /** --ai 用の LLM 要約クライアント生成 (テストで注入する)。 */
+  aiFactory?(): AiSummarizer;
   /** グループ名省略時の対話選択 UI (テストで注入する)。 */
   selectGroup?(choices: readonly string[]): Promise<string>;
   /** stdin が TTY かどうか (テストで注入する)。 */
@@ -58,6 +62,7 @@ interface ErrorsOptions {
   live?: string;
   count?: string;
   failOver?: string;
+  ai?: boolean;
   showIgnored?: boolean;
   profile?: string;
   region?: string;
@@ -126,6 +131,14 @@ async function execute(
       throw new Error(`不正なフォーマット: "${format}" (table | json | md)`);
     }
     const timeSpec = o.time ?? config.defaults.time ?? DEFAULTS.time;
+    if (o.ai !== undefined && o.ai) {
+      if (format === "json") {
+        throw new Error("--ai は --format json と併用できません (json は機械処理用のため)");
+      }
+      if (o.live !== undefined) {
+        throw new Error("--ai は --live と併用できません");
+      }
+    }
     if (o.time !== undefined && (o.since !== undefined || o.until !== undefined)) {
       throw new Error(
         "--time と --since/--until は同時に指定できません。絶対時刻は --since/--until を使ってください"
@@ -222,6 +235,13 @@ async function execute(
     if (o.live === undefined) {
       reportResults = await collectResults();
       io.stdout(renderResults(reportResults, format, top));
+      if (o.ai !== undefined && o.ai) {
+        // 集計スナップショット (正規化済みパターン・件数・サンプル) を LLM へ渡して要約。
+        // 送信内容は --help に明記しており、生ログそのものは送らない。
+        const summarizer = deps.aiFactory?.() as AiSummarizer;
+        const snapshot = reportResults.map((r) => toJsonValue(r, top));
+        io.stdout(`## AI 要約\n\n${await summarizer.summarize(snapshot)}\n`);
+      }
       breached = findBreach(reportResults);
     } else {
       // 監視モード: --live 間隔で再取得して画面をクリアし再描画する。
@@ -316,6 +336,11 @@ export async function runErrorsCommand(
     .option("--live <dur>", "監視モード: 指定間隔で再取得して再描画 (例: 30s)")
     .option("--count <n>", "--live の繰り返し回数。省略時は Ctrl+C まで")
     .option("--fail-over <n>", "エラー件数がこの件数を超えたら exit 2 (CI / cron 向け)")
+    .option(
+      "--ai",
+      "集計結果 (正規化パターン・件数・サンプル) を LLM (Anthropic API) に送信して日本語要約を表示。" +
+        "ANTHROPIC_API_KEY が必要。生ログそのものは送信しない"
+    )
     .option("--show-ignored", "config ignore に一致するパターンも表示する")
     .option("--profile <name>", "AWS profile")
     .option("--region <region>", "AWS region")
@@ -341,6 +366,13 @@ export async function runErrorsCommand(
     writeFile: deps?.writeFile ?? ((path, content) => writeFileSync(path, content, "utf8")),
     sleep: deps?.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
     clearScreen: deps?.clearScreen ?? (() => process.stdout.write("\x1b[2J\x1b[H")),
+    aiFactory:
+      deps?.aiFactory ??
+      (() =>
+        new AnthropicSummarizer(globalThis.fetch, {
+          apiKey: env.ANTHROPIC_API_KEY ?? "",
+          model: env.TB_AI_MODEL ?? "claude-sonnet-5-5",
+        })),
   };
   return execute(parsed.group, parsed.options, io, fullDeps);
 }
