@@ -20,6 +20,9 @@ tb errors prod-api --level WARN,ERROR --format md
 
 # JSON で機械処理
 tb errors /aws/lambda/prod-api --format json | jq '.groups[0]'
+
+# 昨日の障害時間帯を振り返り調査 (絶対時刻指定)
+tb errors prod-api --since 2026-10-18T14:00 --until 2026-10-18T15:30
 ```
 
 ### オプション
@@ -27,6 +30,8 @@ tb errors /aws/lambda/prod-api --format json | jq '.groups[0]'
 | オプション | 説明 | デフォルト |
 |---|---|---|
 | `--time, -t <dur>` | 時間窓 (`10m` / `1h` / `2d`) | `15m` |
+| `--since <datetime>` | 開始時刻 (ISO 8601)。`--time` と併用不可。省略時は `--until` から `--time` 分遡る、または現在時刻 | — |
+| `--until <datetime>` | 終了時刻 (ISO 8601)。省略時は現在時刻 | 現在時刻 |
 | `--level, -l <levels>` | 対象レベル (カンマ区切り) | `ERROR` |
 | `--format, -f <fmt>` | `table` / `json` / `md` | `table` |
 | `--top <n>` | ランキング上位件数 | `20` |
