@@ -60,10 +60,10 @@ const okResult: FetchResult = {
 };
 
 const makeDeps = (
-  provider: LogProvider,
+  provider: Partial<LogProvider>,
   env: NodeJS.ProcessEnv = { HOME: "/tmp" }
 ): Partial<RunDeps> => ({
-  providerFactory: () => provider,
+  providerFactory: () => provider as LogProvider,
   env,
   now: () => NOW,
 });
@@ -274,6 +274,59 @@ describe("runErrorsCommand: compare (diff)", () => {
   });
 });
 
+describe("runErrorsCommand: multi groups", () => {
+  const listOk = (names: string[]) => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const provider: Partial<LogProvider> = {
+      fetch,
+      listGroupNames: vi.fn(async () => names),
+    };
+    return { fetch, provider };
+  };
+
+  it("カンマ区切り 2 グループは各グループを fetch し両方を出力する", async () => {
+    const { fetch, provider } = listOk([]);
+    const io = makeIo();
+    const code = await runErrorsCommand(["errors", "/a,/b"], io, makeDeps(provider));
+    expect(code).toBe(0);
+    expect(fetch.mock.calls.map((c) => c[0].logGroup)).toEqual(["/a", "/b"]);
+    expect(io.out.join("")).toContain("/a");
+    expect(io.out.join("")).toContain("/b");
+  });
+
+  it("--format json で複数グループは配列になる", async () => {
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "/a,/b", "--format", "json"],
+      io,
+      makeDeps(listOk([]).provider)
+    );
+    expect(code).toBe(0);
+    const parsed = JSON.parse(io.out.join(""));
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed.map((r: { logGroup: string }) => r.logGroup)).toEqual(["/a", "/b"]);
+  });
+
+  it("末尾ワイルドカードは listGroupNames で展開する", async () => {
+    const { fetch, provider } = listOk(["/aws/lambda/prod-api", "/aws/lambda/prod-api-worker"]);
+    const io = makeIo();
+    const code = await runErrorsCommand(["errors", "prod-api-*"], io, makeDeps(provider));
+    expect(code).toBe(0);
+    expect(provider.listGroupNames).toHaveBeenCalledWith("prod-api-");
+    expect(fetch.mock.calls.map((c) => c[0].logGroup)).toEqual([
+      "/aws/lambda/prod-api",
+      "/aws/lambda/prod-api-worker",
+    ]);
+  });
+
+  it("ワイルドカードが 0 件なら exit 1", async () => {
+    const io = makeIo();
+    const code = await runErrorsCommand(["errors", "nope-*"], io, makeDeps(listOk([]).provider));
+    expect(code).toBe(1);
+    expect(io.err.join("")).toContain("ロググループが見つかりません");
+  });
+});
+
 describe("runErrorsCommand: errors", () => {
   it("デフォルトで 15m 窓・ERROR タームフィルタ・limit 1000 でクエリし、table 出力する", async () => {
     const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
@@ -412,5 +465,52 @@ describe("runErrorsCommand: errors", () => {
       now: () => NOW,
     });
     expect(factory).toHaveBeenCalledWith({ region: "ap-northeast-1", profile: "prod" });
+  });
+});
+
+describe("runErrorsCommand: ignore", () => {
+  const ignoredResult: FetchResult = {
+    events: [
+      { timestamp: new Date("2026-10-03T09:55:00Z"), message: "timeout id=1111" },
+      { timestamp: new Date("2026-10-03T09:56:00Z"), message: "NoSuchElementException" },
+    ],
+    truncated: false,
+  };
+  const envWithIgnore = (extra: Record<string, unknown> = {}) =>
+    withConfig(JSON.stringify({ ignore: ["NoSuchElementException"], ...extra }));
+
+  it("config ignore に一致するパターンはデフォルトで除外し ignored 件数を表示する", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(ignoredResult);
+    const io = makeIo();
+    const code = await runErrorsCommand(["errors", "g"], io, makeDeps({ fetch }, envWithIgnore()));
+    expect(code).toBe(0);
+    const out = io.out.join("");
+    expect(out).toContain("timeout id=<num>");
+    expect(out).not.toContain("NoSuchElementException");
+    expect(out).toContain("ignored: 1");
+  });
+
+  it("--show-ignored で除外パターンも表示する", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(ignoredResult);
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--show-ignored"],
+      io,
+      makeDeps({ fetch }, envWithIgnore())
+    );
+    expect(code).toBe(0);
+    expect(io.out.join("")).toContain("NoSuchElementException");
+  });
+
+  it("config ignore の正規表現が不正ならエラーで終了する", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>();
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g"],
+      io,
+      makeDeps({ fetch }, withConfig(JSON.stringify({ ignore: ["/[unclosed/"] })))
+    );
+    expect(code).toBe(1);
+    expect(io.err.join("")).toContain("ignore パターンの正規表現が不正です");
   });
 });

@@ -29,7 +29,29 @@ tb errors prod-api --time 2h --bucket 5m
 
 # 直前 1 時間との比較で「新規 / 増えた」エラーだけ注目
 tb errors prod-api --time 1h --compare 1h
+
+# 複数グループをまとめて確認 (カンマ区切り)
+tb errors prod-api,batch-worker --time 1h
+
+# ワイルドカードでパターン一致するグループを一括抽出 (DescribeLogGroups で展開)
+tb errors "prod-api-*" --time 30m
+
+# 既知エラーを抑制して新しいパターンだけ注目 (--show-ignored で確認モード)
+tb errors prod-api --time 1h
+tb errors prod-api --time 1h --show-ignored
 ```
+
+### ロググループの指定
+
+`<group>` には次のいずれかを指定できます（カンマ区切りで併用可、重複は自動排除）:
+
+- **エイリアス**: 設定ファイルの `aliases` で解決（例: `prod-api`）
+- **完全名**: `/aws/lambda/prod-api` のようなロググループ名そのもの
+- **末尾ワイルドカード**: `prod-api-*` のように末尾 `*` で prefix 一致するグループを
+  DescribeLogGroups で展開（展開数は最大 20 グループ。0 件の場合はエラーで終了）
+
+複数グループを指定した場合、各グループごとに fetch → 集計して出力します。
+`--format table` / `md` はグループごとのセクション連結、`--format json` は結果の配列になります。
 
 ### オプション
 
@@ -45,6 +67,7 @@ tb errors prod-api --time 1h --compare 1h
 | `--top <n>` | ランキング上位件数 | `20` |
 | `--limit <n>` | 取得最大イベント数 | `1000` |
 | `--filter <pattern>` | CloudWatch フィルタパターン直接指定 | — |
+| `--show-ignored` | config `ignore` に一致する既知パターンも表示する | 除外 |
 | `--profile <name>` | AWS profile | — |
 | `--region <region>` | AWS region | — |
 
@@ -57,12 +80,27 @@ tb errors prod-api --time 1h --compare 1h
   "aliases": {
     "prod-api": "/aws/lambda/prod-api"
   },
+  "ignore": [
+    "NoSuchElementException",
+    "/Connection reset by peer/"
+  ],
   "defaults": {
     "region": "ap-northeast-1",
     "time": "15m"
   }
 }
 ```
+
+### 既知エラーの抑制 (`ignore`)
+
+`ignore` に登録したパターンはデフォルトで集計から除外され、出力の `ignored: N` に除外件数だけが表示されます。
+除外するかどうかは正規化済みパターンに対して判定します:
+
+- `/.../` 形式 → 正規表現（部分一致）。例: `/Connection reset by peer/`
+- それ以外 → 完全一致。例: `NoSuchElementException`
+
+`--show-ignored` を付けると除外パターンも含めて表示し、既知ノイズを確認できます。
+`--compare` と組み合わせれば「新規パターンのみ」の抽出が強化されます。
 
 認証は AWS 標準 credential chain（環境変数 / shared config / `--profile`）を利用します。
 

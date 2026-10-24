@@ -31,7 +31,7 @@ describe("configFilePath", () => {
 describe("loadConfig", () => {
   it("ファイルがなければデフォルト設定を返す", () => {
     const env = { XDG_CONFIG_HOME: "/nonexistent-tb", HOME: "/nonexistent-tb" };
-    expect(loadConfig(env)).toEqual({ aliases: {}, defaults: {} });
+    expect(loadConfig(env)).toEqual({ aliases: {}, ignore: [], defaults: {} });
   });
 
   it("有効な設定を読み込む", () => {
@@ -43,6 +43,7 @@ describe("loadConfig", () => {
     );
     expect(loadConfig(env)).toEqual({
       aliases: { "prod-api": "/aws/lambda/prod-api" },
+      ignore: [],
       defaults: { region: "ap-northeast-1", time: "30m", format: "json" },
     });
   });
@@ -60,6 +61,28 @@ describe("loadConfig", () => {
   it("defaults の部分的な指定も許容する", () => {
     const env = withConfig(JSON.stringify({ defaults: { top: 5 } }));
     expect(loadConfig(env).defaults).toEqual({ top: 5 });
+  });
+
+  it("ignore パターンを読み込む", () => {
+    const env = withConfig(
+      JSON.stringify({
+        ignore: ["NoSuchElementException", "/Connection reset by peer/"],
+      })
+    );
+    expect(loadConfig(env).ignore).toEqual([
+      "NoSuchElementException",
+      "/Connection reset by peer/",
+    ]);
+  });
+
+  it("ignore 未指定時は空配列", () => {
+    const env = withConfig(JSON.stringify({ aliases: {} }));
+    expect(loadConfig(env).ignore).toEqual([]);
+  });
+
+  it("ignore が文字列配列でなければエラー", () => {
+    const env = withConfig(JSON.stringify({ ignore: [1, 2] }));
+    expect(() => loadConfig(env)).toThrow(/設定ファイル/);
   });
 });
 
