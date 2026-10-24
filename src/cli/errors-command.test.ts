@@ -575,3 +575,131 @@ describe("runErrorsCommand: --save", () => {
     expect(io.err.join("")).toContain("レポートの保存に失敗しました");
   });
 });
+
+describe("runErrorsCommand: --live", () => {
+  const makeLiveDeps = (provider: Partial<LogProvider>, count: string[]): Partial<RunDeps> => ({
+    ...makeDeps(provider),
+    sleep: async (ms: number) => {
+      void ms;
+    },
+    clearScreen: () => {
+      count.push("clear");
+    },
+  });
+
+  it("--live 30s --count 2 は 2 回描画して exit 0", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const io = makeIo();
+    const cleared: string[] = [];
+    const code = await runErrorsCommand(
+      ["errors", "g", "--live", "30s", "--count", "2"],
+      io,
+      makeLiveDeps({ fetch }, cleared)
+    );
+    expect(code).toBe(0);
+    expect(cleared).toHaveLength(2);
+    // 監視中であることが分かるヘッダ
+    expect(io.out.join("")).toContain("監視中");
+    expect(io.out.join("")).toContain("Ctrl+C で終了");
+  });
+
+  it("--live の間隔は fetch の時間窓に影響しない (常に --time 窓を再取得)", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const io = makeIo();
+    const cleared: string[] = [];
+    await runErrorsCommand(
+      ["errors", "g", "--live", "30s", "--count", "2"],
+      io,
+      makeLiveDeps({ fetch }, cleared)
+    );
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const calls = fetch.mock.calls.map((c) => c[0]);
+    expect(calls[1]!.startTime.getTime()).toBe(calls[0]!.startTime.getTime());
+  });
+
+  it("--live に不正な間隔はエラーで終了する", async () => {
+    const io = makeIo();
+    const cleared: string[] = [];
+    const code = await runErrorsCommand(
+      ["errors", "g", "--live", "bad"],
+      io,
+      makeLiveDeps({ fetch: vi.fn() }, cleared)
+    );
+    expect(code).toBe(1);
+    expect(io.err.join("")).toContain("Invalid duration");
+  });
+});
+
+describe("runErrorsCommand: --fail-over", () => {
+  const eventsOf = (n: number): FetchResult => ({
+    events: Array.from({ length: n }, (_, i) => ({
+      timestamp: new Date("2026-10-03T09:55:00Z"),
+      message: `error ${i}`,
+    })),
+    truncated: false,
+  });
+
+  it("totalEvents が閾値以下なら exit 0", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(eventsOf(5));
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--fail-over", "10"],
+      io,
+      makeDeps({ fetch })
+    );
+    expect(code).toBe(0);
+  });
+
+  it("totalEvents が閾値を超えたら exit 2 で stderr に件数を出す", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(eventsOf(15));
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--fail-over", "10"],
+      io,
+      makeDeps({ fetch })
+    );
+    expect(code).toBe(2);
+    expect(io.err.join("")).toContain("閾値 (10) を超えました");
+    expect(io.err.join("")).toContain("15");
+  });
+
+  it("複数グループのどれかが超過なら exit 2", async () => {
+    const fetch = vi
+      .fn<(q: LogQuery) => Promise<FetchResult>>()
+      .mockResolvedValueOnce(eventsOf(3))
+      .mockResolvedValueOnce(eventsOf(20));
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "a,b", "--fail-over", "10"],
+      io,
+      makeDeps({ fetch })
+    );
+    expect(code).toBe(2);
+  });
+
+  it("--live 併用時は超過 tick で即中断して exit 2", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(eventsOf(15));
+    const io = makeIo();
+    const cleared: string[] = [];
+    const code = await runErrorsCommand(["errors", "g", "--live", "30s", "--fail-over", "10"], io, {
+      ...makeDeps({ fetch }),
+      sleep: async () => {
+        throw new Error("should not sleep after threshold breach");
+      },
+      clearScreen: () => cleared.push("clear"),
+    });
+    expect(code).toBe(2);
+    expect(cleared).toHaveLength(1); // 2 回目の tick の前に中断
+  });
+
+  it("閾値が 0 以下はエラーで終了する", async () => {
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--fail-over", "0"],
+      io,
+      makeDeps({ fetch: vi.fn() })
+    );
+    expect(code).toBe(1);
+    expect(io.err.join("")).toContain("正の整数");
+  });
+});

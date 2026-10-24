@@ -1,4 +1,5 @@
 import { runErrorsCommand } from "./errors-command.js";
+import { runInsightsCommand } from "./insights-command.js";
 import { runShowCommand } from "./show-command.js";
 import { runTailCommand } from "./tail-command.js";
 
@@ -9,7 +10,13 @@ const io = {
 
 const argv = process.argv.slice(2);
 const run =
-  argv[0] === "tail" ? runTailCommand : argv[0] === "show" ? runShowCommand : runErrorsCommand;
+  argv[0] === "tail"
+    ? runTailCommand
+    : argv[0] === "show"
+      ? runShowCommand
+      : argv[0] === "insights"
+        ? runInsightsCommand
+        : runErrorsCommand;
 
 void run(argv, io)
   .then((code) => {

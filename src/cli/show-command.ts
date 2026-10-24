@@ -1,13 +1,12 @@
-import { CloudWatchLogsClient } from "@aws-sdk/client-cloudwatch-logs";
 import { Command, CommanderError } from "commander";
 import { loadConfig } from "../config/load.js";
 import { withContext } from "../core/context.js";
 import { resolveGroupExpressions } from "../core/resolve-groups.js";
 import { resolveTimeWindow } from "../core/time-window.js";
-import { CloudWatchProvider } from "../providers/cloudwatch.js";
-import type { LogEvent, LogProvider } from "../providers/types.js";
+import type { LogEvent } from "../providers/types.js";
 import { VERSION } from "../version.js";
 import type { CliIo, RunDeps } from "./errors-command.js";
+import { cloudWatchProviderFactory } from "../providers/factory.js";
 
 interface ShowOptions {
   pattern?: string;
@@ -88,11 +87,6 @@ async function execute(group: string, o: ShowOptions, io: CliIo, deps: RunDeps):
   }
 }
 
-const defaultProviderFactory = (opts: { region?: string; profile?: string }): LogProvider => {
-  const client = new CloudWatchLogsClient(opts);
-  return new CloudWatchProvider(client.send.bind(client));
-};
-
 export async function runShowCommand(
   argv: string[],
   io: CliIo,
@@ -127,10 +121,12 @@ export async function runShowCommand(
   }
   if (parsed === undefined) return 0;
   const fullDeps: RunDeps = {
-    providerFactory: deps?.providerFactory ?? defaultProviderFactory,
+    providerFactory: deps?.providerFactory ?? cloudWatchProviderFactory,
     env: deps?.env ?? process.env,
     now: deps?.now ?? (() => new Date()),
     writeFile: deps?.writeFile ?? (() => {}),
+    sleep: deps?.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
+    clearScreen: deps?.clearScreen ?? (() => {}),
   };
   return execute(parsed.group, parsed.options, io, fullDeps);
 }
