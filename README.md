@@ -35,6 +35,10 @@ tb errors prod-api,batch-worker --time 1h
 
 # ワイルドカードでパターン一致するグループを一括抽出 (DescribeLogGroups で展開)
 tb errors "prod-api-*" --time 30m
+
+# 既知エラーを抑制して新しいパターンだけ注目 (--show-ignored で確認モード)
+tb errors prod-api --time 1h
+tb errors prod-api --time 1h --show-ignored
 ```
 
 ### ロググループの指定
@@ -63,6 +67,7 @@ tb errors "prod-api-*" --time 30m
 | `--top <n>` | ランキング上位件数 | `20` |
 | `--limit <n>` | 取得最大イベント数 | `1000` |
 | `--filter <pattern>` | CloudWatch フィルタパターン直接指定 | — |
+| `--show-ignored` | config `ignore` に一致する既知パターンも表示する | 除外 |
 | `--profile <name>` | AWS profile | — |
 | `--region <region>` | AWS region | — |
 
@@ -75,12 +80,27 @@ tb errors "prod-api-*" --time 30m
   "aliases": {
     "prod-api": "/aws/lambda/prod-api"
   },
+  "ignore": [
+    "NoSuchElementException",
+    "/Connection reset by peer/"
+  ],
   "defaults": {
     "region": "ap-northeast-1",
     "time": "15m"
   }
 }
 ```
+
+### 既知エラーの抑制 (`ignore`)
+
+`ignore` に登録したパターンはデフォルトで集計から除外され、出力の `ignored: N` に除外件数だけが表示されます。
+除外するかどうかは正規化済みパターンに対して判定します:
+
+- `/.../` 形式 → 正規表現（部分一致）。例: `/Connection reset by peer/`
+- それ以外 → 完全一致。例: `NoSuchElementException`
+
+`--show-ignored` を付けると除外パターンも含めて表示し、既知ノイズを確認できます。
+`--compare` と組み合わせれば「新規パターンのみ」の抽出が強化されます。
 
 認証は AWS 標準 credential chain（環境変数 / shared config / `--profile`）を利用します。
 

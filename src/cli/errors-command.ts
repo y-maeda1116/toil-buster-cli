@@ -5,6 +5,7 @@ import type { SummaryResult } from "../core/aggregate.js";
 import { parseDuration } from "../core/duration.js";
 import { compareGroups } from "../core/compare.js";
 import { resolveGroupExpressions } from "../core/resolve-groups.js";
+import { parseIgnoreSpecs } from "../core/ignore.js";
 import { loadConfig } from "../config/load.js";
 import { CloudWatchProvider } from "../providers/cloudwatch.js";
 import type { LogProvider } from "../providers/types.js";
@@ -37,6 +38,7 @@ interface ErrorsOptions {
   top?: string;
   limit?: string;
   filter?: string;
+  showIgnored?: boolean;
   profile?: string;
   region?: string;
 }
@@ -118,6 +120,8 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
     const compareMs = o.compare === undefined ? undefined : parseDuration(o.compare);
     const provider = deps.providerFactory({ region, profile });
     const groups = await resolveGroupExpressions(group, config.aliases, provider);
+    // --show-ignored は既知パターンも確認するモード。比較は表示 groups 基準で行う。
+    const ignore = { specs: parseIgnoreSpecs(config.ignore), showIgnored: o.showIgnored };
 
     const results: SummaryResult[] = [];
     for (const logGroup of groups) {
@@ -135,7 +139,8 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
         window.end,
         events,
         truncated,
-        bucketMs
+        bucketMs,
+        ignore
       );
 
       if (compareMs === undefined) {
@@ -157,7 +162,9 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
         compareStart,
         compareEnd,
         prev.events,
-        prev.truncated
+        prev.truncated,
+        undefined,
+        ignore
       );
       results.push({
         ...summary,
@@ -219,6 +226,7 @@ export async function runErrorsCommand(
     .option("--top <n>", "頻度ランキング上位件数。デフォルト 20")
     .option("--limit <n>", "取得最大イベント数。デフォルト 1000")
     .option("--filter <pattern>", "CloudWatch フィルタパターン直接指定")
+    .option("--show-ignored", "config ignore に一致するパターンも表示する")
     .option("--profile <name>", "AWS profile")
     .option("--region <region>", "AWS region")
     .action((group, options) => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { aggregateEvents } from "./aggregate.js";
+import { parseIgnoreSpecs } from "./ignore.js";
 import type { LogEvent } from "../providers/types.js";
 
 const event = (timestamp: string, message: string): LogEvent => ({
@@ -74,5 +75,56 @@ describe("aggregateEvents", () => {
 
   it("bucketMs 不正 (バケット過多) はエラーとして伝播する", () => {
     expect(() => aggregateEvents("/g", start, end, [], false, 1000)).toThrow(/--bucket/);
+  });
+
+  describe("ignore 指定時", () => {
+    const events = [
+      event("2026-10-03T09:01:00Z", "timeout id=1111"),
+      event("2026-10-03T09:02:00Z", "NoSuchElementException"),
+      event("2026-10-03T09:03:00Z", "Connection reset by peer on 443"),
+    ];
+
+    it("完全一致するパターンを groups から除外し ignoredEvents に件数を入れる", () => {
+      const specs = parseIgnoreSpecs(["NoSuchElementException"]);
+      const result = aggregateEvents("/g", start, end, events, false, undefined, { specs });
+      expect(result.groups.map((g) => g.pattern)).toEqual([
+        "timeout id=<num>",
+        "Connection reset by peer on 443",
+      ]);
+      expect(result.ignoredEvents).toBe(1);
+      expect(result.totalEvents).toBe(3);
+    });
+
+    it("正規表現仕様で部分一致除外する", () => {
+      const specs = parseIgnoreSpecs(["/Connection reset by peer/"]);
+      const result = aggregateEvents("/g", start, end, events, false, undefined, { specs });
+      expect(result.groups.map((g) => g.pattern)).not.toContain("Connection reset by peer on 443");
+      expect(result.ignoredEvents).toBe(1);
+    });
+
+    it("showIgnored: true なら groups に含めつつ ignoredEvents をカウントする", () => {
+      const specs = parseIgnoreSpecs(["NoSuchElementException"]);
+      const result = aggregateEvents("/g", start, end, events, false, undefined, {
+        specs,
+        showIgnored: true,
+      });
+      expect(result.groups.map((g) => g.pattern)).toContain("NoSuchElementException");
+      expect(result.ignoredEvents).toBe(1);
+    });
+
+    it("ignore なしでは ignoredEvents は undefined のまま", () => {
+      const result = aggregateEvents("/g", start, end, events, false);
+      expect(result.ignoredEvents).toBeUndefined();
+    });
+
+    it("timeline は除外後のイベントで計算する", () => {
+      const specs = parseIgnoreSpecs(["NoSuchElementException"]);
+      const withIgnore = aggregateEvents("/g", start, end, events, false, 5 * 60_000, {
+        specs,
+      });
+      const withoutIgnore = aggregateEvents("/g", start, end, events, false, 5 * 60_000);
+      expect(withIgnore.timeline!.map((b) => b.count)).toEqual([2, 0, 0]);
+      expect(withoutIgnore.timeline!.map((b) => b.count)).toEqual([3, 0, 0]);
+    });
   });
 });
