@@ -67,6 +67,9 @@ tb errors prod-api --live 1m --count 10
 # CI / cron で閾値超過時に異常終了 (exit 2)
 tb errors prod-api --time 10m --fail-over 100 --format json
 
+# 集計結果を LLM に渡して日本語要約 (ANTHROPIC_API_KEY が必要)
+tb errors prod-api --time 1h --ai
+
 # Datadog をバックエンドに使う (ロググループ = service)
 DD_API_KEY=xxx DD_APP_KEY=yyy tb errors prod-api --time 1h --provider datadog
 ```
@@ -112,25 +115,26 @@ FetchLogEvents より大量のログを効率よく集計したいときに使�
 
 ### オプション
 
-| オプション | 説明 | デフォルト |
-|---|---|---|
-| `--time, -t <dur>` | 時間窓 (`10m` / `1h` / `2d`) | `15m` |
-| `--since <datetime>` | 開始時刻 (ISO 8601)。`--time` と併用不可。省略時は `--until` から `--time` 分遡る、または現在時刻 | — |
-| `--until <datetime>` | 終了時刻 (ISO 8601)。省略時は現在時刻 | 現在時刻 |
-| `--bucket <dur>` | タイムラインのバケット幅 (例: `5m`)。指定時は時間別カウントを表示 | — |
-| `--compare <dur>` | 直前の指定幅の窓との比較。`new` / `increased` / `decreased` / `resolved` を表示 | — |
-| `--level, -l <levels>` | 対象レベル (カンマ区切り) | `ERROR` |
-| `--format, -f <fmt>` | `table` / `json` / `md` | `table` |
-| `--top <n>` | ランキング上位件数 | `20` |
-| `--limit <n>` | 取得最大イベント数 | `1000` |
-| `--filter <pattern>` | CloudWatch フィルタパターン直接指定 | — |
-| `--show-ignored` | config `ignore` に一致する既知パターンも表示する | 除外 |
-| `--save <path>` | メタ情報付きインシデントレポート (Markdown) を指定パスに保存。stdout 出力は通常どおり | — |
-| `--live <dur>` | 監視モード: 指定間隔で再取得して画面をクリアし再描画。Ctrl+C で終了 | — |
-| `--count <n>` | `--live` の繰り返し回数。省略時は Ctrl+C まで | — |
-| `--fail-over <n>` | エラー件数 (取得イベント総数) が閾値を超えたら exit 2。終了コードは 0=正常 / 1=コマンドエラー / 2=閾値超過 | — |
-| `--profile <name>` | AWS profile | — |
-| `--region <region>` | AWS region | — |
+| オプション             | 説明                                                                                                       | デフォルト |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------- | ---------- |
+| `--time, -t <dur>`     | 時間窓 (`10m` / `1h` / `2d`)                                                                               | `15m`      |
+| `--since <datetime>`   | 開始時刻 (ISO 8601)。`--time` と併用不可。省略時は `--until` から `--time` 分遡る、または現在時刻          | —          |
+| `--until <datetime>`   | 終了時刻 (ISO 8601)。省略時は現在時刻                                                                      | 現在時刻   |
+| `--bucket <dur>`       | タイムラインのバケット幅 (例: `5m`)。指定時は時間別カウントを表示                                          | —          |
+| `--compare <dur>`      | 直前の指定幅の窓との比較。`new` / `increased` / `decreased` / `resolved` を表示                            | —          |
+| `--level, -l <levels>` | 対象レベル (カンマ区切り)                                                                                  | `ERROR`    |
+| `--format, -f <fmt>`   | `table` / `json` / `md`                                                                                    | `table`    |
+| `--top <n>`            | ランキング上位件数                                                                                         | `20`       |
+| `--limit <n>`          | 取得最大イベント数                                                                                         | `1000`     |
+| `--filter <pattern>`   | CloudWatch フィルタパターン直接指定                                                                        | —          |
+| `--show-ignored`       | config `ignore` に一致する既知パターンも表示する                                                           | 除外       |
+| `--save <path>`        | メタ情報付きインシデントレポート (Markdown) を指定パスに保存。stdout 出力は通常どおり                      | —          |
+| `--live <dur>`         | 監視モード: 指定間隔で再取得して画面をクリアし再描画。Ctrl+C で終了                                        | —          |
+| `--count <n>`          | `--live` の繰り返し回数。省略時は Ctrl+C まで                                                              | —          |
+| `--fail-over <n>`      | エラー件数 (取得イベント総数) が閾値を超えたら exit 2。終了コードは 0=正常 / 1=コマンドエラー / 2=閾値超過 | —          |
+| `--ai`                 | 集計結果を Anthropic API に送信して日本語要約を表示 (`ANTHROPIC_API_KEY` 必須、json/live 併用不可)         | —          |
+| `--profile <name>`     | AWS profile                                                                                                | —          |
+| `--region <region>`    | AWS region                                                                                                 | —          |
 
 ### 設定ファイル
 
@@ -141,10 +145,7 @@ FetchLogEvents より大量のログを効率よく集計したいときに使�
   "aliases": {
     "prod-api": "/aws/lambda/prod-api"
   },
-  "ignore": [
-    "NoSuchElementException",
-    "/Connection reset by peer/"
-  ],
+  "ignore": ["NoSuchElementException", "/Connection reset by peer/"],
   "defaults": {
     "region": "ap-northeast-1",
     "time": "15m"
@@ -164,6 +165,16 @@ FetchLogEvents より大量のログを効率よく集計したいときに使�
 `--compare` と組み合わせれば「新規パターンのみ」の抽出が強化されます。
 
 認証は AWS 標準 credential chain（環境変数 / shared config / `--profile`）を利用します。
+
+### LLM 要約 (`--ai`)
+
+`--ai` を付けると、集計結果（正規化済みパターン・出現回数・時間窓・サンプル行）を
+Anthropic API に送信し、日本語の要約を本文出力の後に追記します。
+
+- API キーは環境変数のみ: `ANTHROPIC_API_KEY`（モデルは `TB_AI_MODEL` で変更可、既定 `claude-sonnet-5-5`）
+- **送信データは集計スナップショットのみ**（パターン・件数・サンプル）。生ログ全体は送信しません
+- `--format json` / `--live` とは併用できません（それぞれ機械処理用・監視ループ用のため）
+- 要約は画面表示のみで、`--save` のレポートファイルには含まれません
 
 ### ログバックエンドの切替 (`--provider`)
 
