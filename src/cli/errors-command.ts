@@ -2,6 +2,7 @@ import { CloudWatchLogsClient } from "@aws-sdk/client-cloudwatch-logs";
 import { Command, CommanderError } from "commander";
 import { aggregateEvents } from "../core/aggregate.js";
 import { parseDuration } from "../core/duration.js";
+import { compareGroups } from "../core/compare.js";
 import { loadConfig, resolveGroupName } from "../config/load.js";
 import { CloudWatchProvider } from "../providers/cloudwatch.js";
 import type { LogProvider } from "../providers/types.js";
@@ -28,6 +29,7 @@ interface ErrorsOptions {
   since?: string;
   until?: string;
   bucket?: string;
+  compare?: string;
   level?: string;
   format?: string;
   top?: string;
@@ -98,8 +100,10 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
     const profile = o.profile ?? config.defaults.profile;
 
     const filterPattern = o.filter ?? buildFilterPattern(levelSpec.split(","));
+    const compareMs = o.compare === undefined ? undefined : parseDuration(o.compare);
+    const provider = deps.providerFactory({ region, profile });
 
-    const { events, truncated } = await deps.providerFactory({ region, profile }).fetch({
+    const { events, truncated } = await provider.fetch({
       logGroup: resolvedGroup,
       startTime: window.start,
       endTime: window.end,
@@ -115,9 +119,39 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
       truncated,
       bucketMs
     );
+
+    let result = summary;
+    if (compareMs !== undefined) {
+      // 比較窓は現在窓の直前に隣接する同 filterPattern / limit のクエリ。
+      const compareEnd = window.start;
+      const compareStart = new Date(compareEnd.getTime() - compareMs);
+      const prev = await provider.fetch({
+        logGroup: resolvedGroup,
+        startTime: compareStart,
+        endTime: compareEnd,
+        filterPattern,
+        limit,
+      });
+      const prevSummary = aggregateEvents(
+        resolvedGroup,
+        compareStart,
+        compareEnd,
+        prev.events,
+        prev.truncated
+      );
+      result = {
+        ...summary,
+        comparison: {
+          timeWindow: { start: compareStart, end: compareEnd },
+          totalEvents: prevSummary.totalEvents,
+          groups: compareGroups(summary.groups, prevSummary.groups),
+        },
+      };
+    }
+
     const renderer =
       format === "json" ? renderJson : format === "md" ? renderMarkdown : renderTable;
-    io.stdout(renderer(summary, top));
+    io.stdout(renderer(result, top));
     return 0;
   } catch (err) {
     io.stderr(formatError(err, format));
@@ -161,6 +195,7 @@ export async function runErrorsCommand(
     .option("--since <datetime>", "開始時刻 (ISO 8601。例: 2026-10-18T14:00)。--time と併用不可")
     .option("--until <datetime>", "終了時刻 (ISO 8601)。省略時は現在時刻")
     .option("--bucket <dur>", "タイムラインのバケット幅 (例: 5m)。指定時は時間別カウントを表示")
+    .option("--compare <dur>", "直前の指定幅の窓と比較 (NEW/増減を表示)")
     .option("-l, --level <levels>", "対象レベル (カンマ区切り)。デフォルト ERROR")
     .option("-f, --format <fmt>", "出力形式: table | json | md。デフォルト table")
     .option("--top <n>", "頻度ランキング上位件数。デフォルト 20")

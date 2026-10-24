@@ -1,6 +1,7 @@
 import type { LogEvent } from "../providers/types.js";
 import { normalizeMessage } from "./normalize.js";
 import { computeTimeline, type TimeBucket } from "./timeline.js";
+import type { ComparedGroup } from "./compare.js";
 
 export interface ErrorGroupStats {
   pattern: string;
@@ -10,6 +11,12 @@ export interface ErrorGroupStats {
   sample: string;
 }
 
+export interface ComparisonResult {
+  timeWindow: { start: Date; end: Date };
+  totalEvents: number;
+  groups: ComparedGroup[];
+}
+
 export interface SummaryResult {
   logGroup: string;
   timeWindow: { start: Date; end: Date };
@@ -17,6 +24,7 @@ export interface SummaryResult {
   truncated: boolean;
   groups: ErrorGroupStats[];
   timeline?: TimeBucket[];
+  comparison?: ComparisonResult;
 }
 
 export function aggregateEvents(

@@ -15,27 +15,53 @@ const flattenPattern = (pattern: string) => {
 };
 
 export function renderMarkdown(result: SummaryResult, top: number): string {
-  if (result.groups.length === 0) return `${EMPTY_MESSAGE}\n`;
   const lines = [
     `# Log Summary: ${result.logGroup}`,
     "",
     `- 期間: ${formatWindow(result.timeWindow.start, result.timeWindow.end)}`,
     `- イベント数: ${result.totalEvents}${result.truncated ? "（--limit により打ち切り）" : ""}`,
-    "",
-    "| # | count | % | pattern | first | last |",
-    "|---|---|---|---|---|---|",
   ];
-  for (const [i, g] of result.groups.slice(0, top).entries()) {
-    const pct = ((g.count / result.totalEvents) * 100).toFixed(1);
-    const hhmmss = (d: Date) => d.toTimeString().slice(0, 8);
-    lines.push(
-      `| ${i + 1} | ${g.count} | ${pct}% | \`${escapeCell(flattenPattern(g.pattern))}\` | ${hhmmss(g.firstSeen)} | ${hhmmss(
-        g.lastSeen
-      )} |`
-    );
+  if (result.groups.length === 0) {
+    lines.push("", EMPTY_MESSAGE);
+  } else {
+    lines.push("", "| # | count | % | pattern | first | last |", "|---|---|---|---|---|---|");
+    for (const [i, g] of result.groups.slice(0, top).entries()) {
+      const pct = ((g.count / result.totalEvents) * 100).toFixed(1);
+      const hhmmss = (d: Date) => d.toTimeString().slice(0, 8);
+      lines.push(
+        `| ${i + 1} | ${g.count} | ${pct}% | \`${escapeCell(flattenPattern(g.pattern))}\` | ${hhmmss(g.firstSeen)} | ${hhmmss(
+          g.lastSeen
+        )} |`
+      );
+    }
   }
   if (result.timeline) lines.push(...timelineLines(result.timeline));
+  if (result.comparison) lines.push(...comparisonLines(result.comparison, top));
   return `${lines.join("\n")}\n`;
+}
+
+// 差分は報告書で見やすくなるよう符号を明示する。
+const signedDelta = (delta: number) => (delta > 0 ? `+${delta}` : `${delta}`);
+
+function comparisonLines(
+  comparison: NonNullable<SummaryResult["comparison"]>,
+  top: number
+): string[] {
+  const lines = [
+    "",
+    "## Comparison",
+    "",
+    `- 比較窓: ${comparison.timeWindow.start.toISOString()} 〜 ${comparison.timeWindow.end.toISOString()} (イベント数: ${comparison.totalEvents})`,
+    "",
+    "| status | count | prev | delta | pattern |",
+    "|---|---|---|---|---|",
+  ];
+  for (const g of comparison.groups.slice(0, top)) {
+    lines.push(
+      `| ${g.status} | ${g.count} | ${g.prevCount} | ${signedDelta(g.delta)} | \`${escapeCell(flattenPattern(g.pattern))}\` |`
+    );
+  }
+  return lines;
 }
 
 // 報告書は GitHub で閲覧されるため bar はユニバーサルに見える文字を使う。

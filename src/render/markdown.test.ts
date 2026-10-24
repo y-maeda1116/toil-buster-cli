@@ -127,4 +127,32 @@ describe("renderMarkdown", () => {
     expect(out).toMatch(/2026-10-03T09:00:00Z \| 1 \| ▇/);
     expect(out).toMatch(/2026-10-03T09:05:00Z \| 0 \|\s*\|/);
   });
+
+  it("comparison がある場合は比較テーブルを出す", () => {
+    const out = renderMarkdown(
+      {
+        ...base,
+        comparison: {
+          timeWindow: {
+            start: new Date("2026-10-03T08:00:00Z"),
+            end: new Date("2026-10-03T09:00:00Z"),
+          },
+          totalEvents: 3,
+          groups: [
+            { pattern: "timeout <num>", count: 5, prevCount: 3, delta: 2, status: "increased" },
+            { pattern: "old-err", count: 0, prevCount: 4, delta: -4, status: "resolved" },
+          ],
+        },
+      },
+      20
+    );
+    expect(out).toContain("## Comparison");
+    expect(out).toContain("| status | count | prev | delta | pattern |");
+    expect(out).toMatch(/increased \| 5 \| 3 \| \+2 \| `timeout <num>`/);
+    expect(out).toMatch(/resolved \| 0 \| 4 \| -4 \| `old-err`/);
+  });
+
+  it("comparison が無い場合は Comparison セクションを出さない", () => {
+    expect(renderMarkdown(base, 20)).not.toContain("Comparison");
+  });
 });
