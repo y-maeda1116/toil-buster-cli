@@ -1,11 +1,17 @@
 import { runErrorsCommand } from "./errors-command.js";
+import { runShowCommand } from "./show-command.js";
+import { runTailCommand } from "./tail-command.js";
 
 const io = {
   stdout: (text: string) => process.stdout.write(text),
   stderr: (text: string) => process.stderr.write(text),
 };
 
-void runErrorsCommand(process.argv.slice(2), io)
+const argv = process.argv.slice(2);
+const run =
+  argv[0] === "tail" ? runTailCommand : argv[0] === "show" ? runShowCommand : runErrorsCommand;
+
+void run(argv, io)
   .then((code) => {
     process.exitCode = code;
   })
