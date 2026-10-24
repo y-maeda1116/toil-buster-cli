@@ -66,6 +66,9 @@ tb errors prod-api --live 1m --count 10
 
 # CI / cron で閾値超過時に異常終了 (exit 2)
 tb errors prod-api --time 10m --fail-over 100 --format json
+
+# Datadog をバックエンドに使う (ロググループ = service)
+DD_API_KEY=xxx DD_APP_KEY=yyy tb errors prod-api --time 1h --provider datadog
 ```
 
 ### ロググループの指定
@@ -161,6 +164,17 @@ FetchLogEvents より大量のログを効率よく集計したいときに使�
 `--compare` と組み合わせれば「新規パターンのみ」の抽出が強化されます。
 
 認証は AWS 標準 credential chain（環境変数 / shared config / `--profile`）を利用します。
+
+### ログバックエンドの切替 (`--provider`)
+
+`--provider datadog` (または config `defaults.provider: "datadog"`) で、CloudWatch Logs の代わりに
+Datadog Log Management から取得します。
+
+- 「ロググループ」は Datadog の **service** に対応付けられます（`tb errors prod-api` → `service:prod-api`）
+- 認証情報は環境変数でのみ渡します: `DD_API_KEY` / `DD_APP_KEY` / `DD_SITE`（省略時 `datadoghq.com`）
+- `--filter` は CloudWatch Logs のフィルタ構文であり、Datadog には翻訳されません
+  （Datadog クエリ構文の自由文として service 条件と AND 結合されます）
+- `tb tail` / `tb show` も `--provider datadog` で動作します（`tb insights` は CloudWatch Logs Insights 専用）
 
 ## 開発
 

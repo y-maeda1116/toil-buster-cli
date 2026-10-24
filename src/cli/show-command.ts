@@ -16,6 +16,7 @@ interface ShowOptions {
   limit?: string;
   profile?: string;
   region?: string;
+  provider?: string;
 }
 
 const DEFAULTS = { time: "15m", context: 2, limit: 1000 } as const;
@@ -61,6 +62,7 @@ async function execute(
     const contextLines = positiveInt("--context", o.context, DEFAULTS.context);
     const limit = positiveInt("--limit", o.limit, DEFAULTS.limit);
     const provider = deps.providerFactory({
+      provider: o.provider ?? config.defaults.provider,
       region: o.region ?? config.defaults.region,
       profile: o.profile ?? config.defaults.profile,
     });
@@ -115,6 +117,10 @@ export async function runShowCommand(
     .option("-t, --time <dur>", "遡る時間窓。デフォルト 15m")
     .option("--context <n>", "マッチ行の前後文脈行数。デフォルト 2")
     .option("--limit <n>", "取得最大イベント数。デフォルト 1000")
+    .option(
+      "--provider <name>",
+      "ログバックエンド (cloudwatch | datadog)。datadog は DD_API_KEY / DD_APP_KEY / DD_SITE を使う"
+    )
     .option("--profile <name>", "AWS profile")
     .option("--region <region>", "AWS region")
     .action((group, options) => {

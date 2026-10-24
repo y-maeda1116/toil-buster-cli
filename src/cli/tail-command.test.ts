@@ -86,3 +86,22 @@ describe("runTailCommand", () => {
     }
   });
 });
+
+describe("runTailCommand: --provider", () => {
+  it("--provider datadog が providerFactory へ渡る", async () => {
+    const fetch = vi
+      .fn<(q: LogQuery) => Promise<FetchResult>>()
+      .mockResolvedValue(fetchResult([["2026-10-03T09:58:00Z", "hello"]]));
+    const providerFactory = vi
+      .fn<(opts: { provider?: string }) => LogProvider>()
+      .mockReturnValue({ fetch, listGroupNames: vi.fn() } as unknown as LogProvider);
+    const io = makeIo();
+    const code = await runTailCommand(["tail", "g", "--provider", "datadog"], io, {
+      providerFactory,
+      env: { HOME: "/tmp" },
+      now: () => NOW,
+    });
+    expect(code).toBe(0);
+    expect(providerFactory.mock.calls[0]![0].provider).toBe("datadog");
+  });
+});
