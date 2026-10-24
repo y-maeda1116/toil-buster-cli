@@ -23,6 +23,12 @@ tb errors /aws/lambda/prod-api --format json | jq '.groups[0]'
 
 # 昨日の障害時間帯を振り返り調査 (絶対時刻指定)
 tb errors prod-api --since 2026-10-18T14:00 --until 2026-10-18T15:30
+
+# 5 分ごとのバーストをタイムライン表示
+tb errors prod-api --time 2h --bucket 5m
+
+# 直前 1 時間との比較で「新規 / 増えた」エラーだけ注目
+tb errors prod-api --time 1h --compare 1h
 ```
 
 ### オプション
@@ -32,6 +38,8 @@ tb errors prod-api --since 2026-10-18T14:00 --until 2026-10-18T15:30
 | `--time, -t <dur>` | 時間窓 (`10m` / `1h` / `2d`) | `15m` |
 | `--since <datetime>` | 開始時刻 (ISO 8601)。`--time` と併用不可。省略時は `--until` から `--time` 分遡る、または現在時刻 | — |
 | `--until <datetime>` | 終了時刻 (ISO 8601)。省略時は現在時刻 | 現在時刻 |
+| `--bucket <dur>` | タイムラインのバケット幅 (例: `5m`)。指定時は時間別カウントを表示 | — |
+| `--compare <dur>` | 直前の指定幅の窓との比較。`new` / `increased` / `decreased` / `resolved` を表示 | — |
 | `--level, -l <levels>` | 対象レベル (カンマ区切り) | `ERROR` |
 | `--format, -f <fmt>` | `table` / `json` / `md` | `table` |
 | `--top <n>` | ランキング上位件数 | `20` |

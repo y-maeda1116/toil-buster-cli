@@ -45,4 +45,82 @@ describe("renderTable", () => {
     const r = { ...result([group("a", 1)]), truncated: true };
     expect(renderTable(r, 20)).toContain("--limit");
   });
+
+  it("timeline がある場合はバケット時刻・件数・バーを含むセクションを出す", () => {
+    const r = {
+      ...result([group("a", 3)]),
+      timeline: [
+        {
+          start: new Date("2026-10-03T09:00:00Z"),
+          end: new Date("2026-10-03T09:05:00Z"),
+          count: 3,
+        },
+        {
+          start: new Date("2026-10-03T09:05:00Z"),
+          end: new Date("2026-10-03T09:10:00Z"),
+          count: 0,
+        },
+      ],
+    };
+    const out = renderTable(r, 20);
+    expect(out).toContain("Timeline");
+    expect(out).toContain("3");
+    expect(out).toContain("█");
+  });
+
+  it("timeline が無い場合は Timeline セクションを出さない", () => {
+    expect(renderTable(result([group("a", 1)]), 20)).not.toContain("Timeline");
+  });
+
+  it("comparison がある場合は比較セクション (status/差分) を出す", () => {
+    const r = {
+      ...result([group("timeout <num>", 5)]),
+      comparison: {
+        timeWindow: {
+          start: new Date("2026-10-03T08:00:00Z"),
+          end: new Date("2026-10-03T09:00:00Z"),
+        },
+        totalEvents: 3,
+        groups: [
+          {
+            pattern: "timeout <num>",
+            count: 5,
+            prevCount: 3,
+            delta: 2,
+            status: "increased" as const,
+          },
+          { pattern: "oom <uuid>", count: 1, prevCount: 0, delta: 1, status: "new" as const },
+          { pattern: "old-err", count: 0, prevCount: 4, delta: -4, status: "resolved" as const },
+        ],
+      },
+    };
+    const out = renderTable(r, 20);
+    expect(out).toContain("Comparison");
+    expect(out).toContain("NEW");
+    expect(out).toContain("RESOLVED");
+    expect(out).toContain("oom <uuid>");
+  });
+
+  it("comparison が無い場合は Comparison セクションを出さない", () => {
+    expect(renderTable(result([group("a", 1)]), 20)).not.toContain("Comparison");
+  });
+
+  it("現在 0 件でも comparison があれば比較セクションを出す", () => {
+    const r = {
+      ...result([]),
+      comparison: {
+        timeWindow: {
+          start: new Date("2026-10-03T08:00:00Z"),
+          end: new Date("2026-10-03T09:00:00Z"),
+        },
+        totalEvents: 4,
+        groups: [
+          { pattern: "old-err", count: 0, prevCount: 4, delta: -4, status: "resolved" as const },
+        ],
+      },
+    };
+    const out = renderTable(r, 20);
+    expect(out).toContain("該当時間帯にエラーは見つかりませんでした");
+    expect(out).toContain("RESOLVED");
+  });
 });
