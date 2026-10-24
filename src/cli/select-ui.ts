@@ -1,5 +1,6 @@
 import { stdin } from "node:process";
 import { emitKeypressEvents } from "node:readline";
+import { EventEmitter } from "node:events";
 import chalk from "chalk";
 import { createSelectState, handleKey } from "../core/select.js";
 import type { SelectKey, SelectState } from "../core/select.js";
@@ -9,6 +10,14 @@ interface KeyInfo {
   ctrl?: boolean;
   meta?: boolean;
   str?: string;
+}
+
+interface KeyStream extends EventEmitter {
+  isTTY?: boolean;
+  setRawMode?(mode: boolean): void;
+  pause(): void;
+  resume(): void;
+  write(text: string): boolean | void;
 }
 
 /** readline の keypress 情報を選択 UI のキー種別に変換する。 */
@@ -56,22 +65,27 @@ const render = (state: SelectState): string => {
 /**
  * fzf 風のインクリメンタル検索で 1 グループを選ばせる。
  * Esc での中断は reject し、コマンド側のエラー処理に流す。
+ * 入出力ストリームはテストで注入できる (既定は process.stdin)。
  */
-export async function interactiveSelect(choices: readonly string[]): Promise<string> {
+export async function interactiveSelect(
+  choices: readonly string[],
+  input: KeyStream = stdin,
+  output: Pick<KeyStream, "write"> = input
+): Promise<string> {
   let state = createSelectState(choices);
   return new Promise<string>((resolve, reject) => {
     let lastLines = 0;
     const draw = () => {
-      if (lastLines > 0) stdin.write(`\x1b[${lastLines - 1}A\r`);
+      if (lastLines > 0) output.write(`\x1b[${lastLines - 1}A\r`);
       const rendered = render(state);
-      stdin.write(rendered);
+      output.write(rendered);
       lastLines = rendered.split("\r\n").length;
     };
     const cleanup = () => {
-      stdin.removeListener("keypress", onKeypress);
-      if (stdin.isTTY) stdin.setRawMode(false);
-      stdin.pause();
-      stdin.write("\x1b[?25h\r\n"); // カーソル再表示
+      input.removeListener("keypress", onKeypress);
+      if (input.isTTY) input.setRawMode?.(false);
+      input.pause();
+      output.write("\x1b[?25h\r\n"); // カーソル再表示
     };
     const onKeypress = (_str: string, key: KeyInfo) => {
       const mapped = mapKeypress(key);
@@ -90,11 +104,13 @@ export async function interactiveSelect(choices: readonly string[]): Promise<str
       }
       draw();
     };
-    emitKeypressEvents(stdin);
-    if (stdin.isTTY) stdin.setRawMode(true);
-    stdin.resume();
-    stdin.write("\x1b[?25l"); // カーソル非表示
-    stdin.on("keypress", onKeypress);
+    // emitKeypressEvents は Node の ReadableStream 型を要求するが、
+    // keypress へのリスナ登録自体はテスト注入の簡易ストリームでも成立するため緩めている。
+    emitKeypressEvents(input as unknown as Parameters<typeof emitKeypressEvents>[0]);
+    if (input.isTTY) input.setRawMode?.(true);
+    input.resume();
+    output.write("\x1b[?25l"); // カーソル非表示
+    input.on("keypress", onKeypress);
     draw();
   });
 }
