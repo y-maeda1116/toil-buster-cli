@@ -12,6 +12,7 @@ interface TailOptions {
   lines?: string;
   profile?: string;
   region?: string;
+  provider?: string;
 }
 
 const DEFAULTS = { last: "5m", lines: 50 } as const;
@@ -45,6 +46,7 @@ async function execute(
     const window = resolveTimeWindow({ time: o.last ?? DEFAULTS.last }, deps.now());
     const lines = positiveInt("--lines", o.lines, DEFAULTS.lines);
     const provider = deps.providerFactory({
+      provider: o.provider ?? config.defaults.provider,
       region: o.region ?? config.defaults.region,
       profile: o.profile ?? config.defaults.profile,
     });
@@ -96,6 +98,10 @@ export async function runTailCommand(
     .description("直近の生ログを時系列順に表示 (グループ省略時は対話選択)")
     .option("--last <dur>", "遡る時間窓 (10m / 1h)。デフォルト 5m")
     .option("--lines <n>", "表示する最大行数。デフォルト 50")
+    .option(
+      "--provider <name>",
+      "ログバックエンド (cloudwatch | datadog)。datadog は DD_API_KEY / DD_APP_KEY / DD_SITE を使う"
+    )
     .option("--profile <name>", "AWS profile")
     .option("--region <region>", "AWS region")
     .action((group, options) => {

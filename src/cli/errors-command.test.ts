@@ -703,3 +703,37 @@ describe("runErrorsCommand: --fail-over", () => {
     expect(io.err.join("")).toContain("正の整数");
   });
 });
+
+describe("runErrorsCommand: --provider", () => {
+  it("CLI オプション (--provider datadog) が providerFactory へ渡る", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const providerFactory = vi
+      .fn<(opts: { provider?: string; region?: string; profile?: string }) => LogProvider>()
+      .mockReturnValue({ fetch, listGroupNames: vi.fn() } as unknown as LogProvider);
+    const io = makeIo();
+    const code = await runErrorsCommand(["errors", "g", "--provider", "datadog"], io, {
+      providerFactory,
+      env: { HOME: "/tmp" },
+      now: () => NOW,
+    });
+    expect(code).toBe(0);
+    expect(providerFactory.mock.calls[0]![0].provider).toBe("datadog");
+  });
+
+  it("config defaults.provider が既定になり、CLI オプションで上書きされる", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const providerFactory = vi
+      .fn<(opts: { provider?: string }) => LogProvider>()
+      .mockReturnValue({ fetch, listGroupNames: vi.fn() } as unknown as LogProvider);
+    const env = withConfig(
+      JSON.stringify({
+        aliases: {},
+        ignore: [],
+        defaults: { provider: "datadog" },
+      })
+    );
+    const io = makeIo();
+    await runErrorsCommand(["errors", "g"], io, { providerFactory, env, now: () => NOW });
+    expect(providerFactory.mock.calls[0]![0].provider).toBe("datadog");
+  });
+});

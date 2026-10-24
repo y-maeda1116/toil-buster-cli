@@ -7,7 +7,7 @@ import { compareGroups } from "../core/compare.js";
 import { resolveGroupExpressions } from "../core/resolve-groups.js";
 import { parseIgnoreSpecs } from "../core/ignore.js";
 import { loadConfig } from "../config/load.js";
-import { cloudWatchProviderFactory } from "../providers/factory.js";
+import { providerFor } from "../providers/factory.js";
 import type { InsightsClient } from "../providers/insights.js";
 import type { LogProvider } from "../providers/types.js";
 import { renderJson, toJsonValue } from "../render/json.js";
@@ -26,7 +26,7 @@ export interface CliIo {
 }
 
 export interface RunDeps {
-  providerFactory(opts: { region?: string; profile?: string }): LogProvider;
+  providerFactory(opts: { provider?: string; region?: string; profile?: string }): LogProvider;
   env: NodeJS.ProcessEnv;
   now(): Date;
   /** --save 用のファイル書き込み (テストで注入する)。 */
@@ -61,6 +61,7 @@ interface ErrorsOptions {
   showIgnored?: boolean;
   profile?: string;
   region?: string;
+  provider?: string;
 }
 
 const DEFAULTS = { time: "15m", level: "ERROR", format: "table", top: 20, limit: 1000 } as const;
@@ -136,10 +137,12 @@ async function execute(
     const limit = positiveInt("--limit", o.limit ?? config.defaults.limit, DEFAULTS.limit);
     const region = o.region ?? config.defaults.region;
     const profile = o.profile ?? config.defaults.profile;
+    // バックエンドは CLI オプション > config defaults > cloudwatch の順で決める。
+    const providerName = o.provider ?? config.defaults.provider;
 
     const filterPattern = o.filter ?? buildFilterPattern(levelSpec.split(","));
     const compareMs = o.compare === undefined ? undefined : parseDuration(o.compare);
-    const provider = deps.providerFactory({ region, profile });
+    const provider = deps.providerFactory({ provider: providerName, region, profile });
     // グループ名省略時は一覧からの対話選択 (非 TTY ではエラー)。
     const target = await selectTargetGroup(group, provider, deps);
     const groups = await resolveGroupExpressions(target, config.aliases, provider);
@@ -316,6 +319,10 @@ export async function runErrorsCommand(
     .option("--show-ignored", "config ignore に一致するパターンも表示する")
     .option("--profile <name>", "AWS profile")
     .option("--region <region>", "AWS region")
+    .option(
+      "--provider <name>",
+      "ログバックエンド (cloudwatch | datadog)。datadog は DD_API_KEY / DD_APP_KEY / DD_SITE を使う"
+    )
     .action((group, options) => {
       parsed = { group, options: options as ErrorsOptions };
     });
@@ -326,9 +333,10 @@ export async function runErrorsCommand(
     throw err; // 予期しない例外は index.ts の .catch が拾って exit 1
   }
   if (parsed === undefined) return 0; // --help / --version
+  const env = deps?.env ?? process.env;
   const fullDeps: RunDeps = {
-    providerFactory: deps?.providerFactory ?? cloudWatchProviderFactory,
-    env: deps?.env ?? process.env,
+    providerFactory: deps?.providerFactory ?? ((opts) => providerFor(opts, env)),
+    env,
     now: deps?.now ?? (() => new Date()),
     writeFile: deps?.writeFile ?? ((path, content) => writeFileSync(path, content, "utf8")),
     sleep: deps?.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
