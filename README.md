@@ -43,6 +43,9 @@ tb errors prod-api --time 1h --show-ignored
 # インシデントレポートとして Markdown 保存 (実行時刻・フィルタ条件を含む)
 tb errors prod-api --time 2h --save incident-20261019.md
 
+# グループ名を省略すると fzf 風に一覧から対話選択 (ターミナルのみ)
+tb errors
+
 # 直近の生ログを時系列順に表示
 tb tail prod-api --last 10m --lines 100
 
@@ -63,16 +66,26 @@ tb errors prod-api --live 1m --count 10
 
 # CI / cron で閾値超過時に異常終了 (exit 2)
 tb errors prod-api --time 10m --fail-over 100 --format json
+
+# 集計結果を LLM に渡して日本語要約 (ANTHROPIC_API_KEY が必要)
+tb errors prod-api --time 1h --ai
+
+# Datadog をバックエンドに使う (ロググループ = service)
+DD_API_KEY=xxx DD_APP_KEY=yyy tb errors prod-api --time 1h --provider datadog
 ```
 
 ### ロググループの指定
 
-`<group>` には次のいずれかを指定できます（カンマ区切りで併用可、重複は自動排除）:
+各サブコマンドの `<group>` には次のいずれかを指定できます（カンマ区切りで併用可、重複は自動排除）:
 
 - **エイリアス**: 設定ファイルの `aliases` で解決（例: `prod-api`）
 - **完全名**: `/aws/lambda/prod-api` のようなロググループ名そのもの
 - **末尾ワイルドカード**: `prod-api-*` のように末尾 `*` で prefix 一致するグループを
   DescribeLogGroups で展開（展開数は最大 20 グループ。0 件の場合はエラーで終了）
+
+**グループ名を省略すると**、ターミナル (TTY) からは DescribeLogGroups の一覧を使った
+fzf 風インクリメンタル検索で選択できます（入力で絞り込み / ↑↓ で移動 / Enter で確定 / Esc で中断）。
+CI やスクリプトなど非対話環境では省略時にエラーになるため、必ず明示的に指定してください。
 
 複数グループを指定した場合、各グループごとに fetch → 集計して出力します。
 `--format table` / `md` はグループごとのセクション連結、`--format json` は結果の配列になります。
@@ -102,25 +115,26 @@ FetchLogEvents より大量のログを効率よく集計したいときに使�
 
 ### オプション
 
-| オプション | 説明 | デフォルト |
-|---|---|---|
-| `--time, -t <dur>` | 時間窓 (`10m` / `1h` / `2d`) | `15m` |
-| `--since <datetime>` | 開始時刻 (ISO 8601)。`--time` と併用不可。省略時は `--until` から `--time` 分遡る、または現在時刻 | — |
-| `--until <datetime>` | 終了時刻 (ISO 8601)。省略時は現在時刻 | 現在時刻 |
-| `--bucket <dur>` | タイムラインのバケット幅 (例: `5m`)。指定時は時間別カウントを表示 | — |
-| `--compare <dur>` | 直前の指定幅の窓との比較。`new` / `increased` / `decreased` / `resolved` を表示 | — |
-| `--level, -l <levels>` | 対象レベル (カンマ区切り) | `ERROR` |
-| `--format, -f <fmt>` | `table` / `json` / `md` | `table` |
-| `--top <n>` | ランキング上位件数 | `20` |
-| `--limit <n>` | 取得最大イベント数 | `1000` |
-| `--filter <pattern>` | CloudWatch フィルタパターン直接指定 | — |
-| `--show-ignored` | config `ignore` に一致する既知パターンも表示する | 除外 |
-| `--save <path>` | メタ情報付きインシデントレポート (Markdown) を指定パスに保存。stdout 出力は通常どおり | — |
-| `--live <dur>` | 監視モード: 指定間隔で再取得して画面をクリアし再描画。Ctrl+C で終了 | — |
-| `--count <n>` | `--live` の繰り返し回数。省略時は Ctrl+C まで | — |
-| `--fail-over <n>` | エラー件数 (取得イベント総数) が閾値を超えたら exit 2。終了コードは 0=正常 / 1=コマンドエラー / 2=閾値超過 | — |
-| `--profile <name>` | AWS profile | — |
-| `--region <region>` | AWS region | — |
+| オプション             | 説明                                                                                                       | デフォルト |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------- | ---------- |
+| `--time, -t <dur>`     | 時間窓 (`10m` / `1h` / `2d`)                                                                               | `15m`      |
+| `--since <datetime>`   | 開始時刻 (ISO 8601)。`--time` と併用不可。省略時は `--until` から `--time` 分遡る、または現在時刻          | —          |
+| `--until <datetime>`   | 終了時刻 (ISO 8601)。省略時は現在時刻                                                                      | 現在時刻   |
+| `--bucket <dur>`       | タイムラインのバケット幅 (例: `5m`)。指定時は時間別カウントを表示                                          | —          |
+| `--compare <dur>`      | 直前の指定幅の窓との比較。`new` / `increased` / `decreased` / `resolved` を表示                            | —          |
+| `--level, -l <levels>` | 対象レベル (カンマ区切り)                                                                                  | `ERROR`    |
+| `--format, -f <fmt>`   | `table` / `json` / `md`                                                                                    | `table`    |
+| `--top <n>`            | ランキング上位件数                                                                                         | `20`       |
+| `--limit <n>`          | 取得最大イベント数                                                                                         | `1000`     |
+| `--filter <pattern>`   | CloudWatch フィルタパターン直接指定                                                                        | —          |
+| `--show-ignored`       | config `ignore` に一致する既知パターンも表示する                                                           | 除外       |
+| `--save <path>`        | メタ情報付きインシデントレポート (Markdown) を指定パスに保存。stdout 出力は通常どおり                      | —          |
+| `--live <dur>`         | 監視モード: 指定間隔で再取得して画面をクリアし再描画。Ctrl+C で終了                                        | —          |
+| `--count <n>`          | `--live` の繰り返し回数。省略時は Ctrl+C まで                                                              | —          |
+| `--fail-over <n>`      | エラー件数 (取得イベント総数) が閾値を超えたら exit 2。終了コードは 0=正常 / 1=コマンドエラー / 2=閾値超過 | —          |
+| `--ai`                 | 集計結果を Anthropic API に送信して日本語要約を表示 (`ANTHROPIC_API_KEY` 必須、json/live 併用不可)         | —          |
+| `--profile <name>`     | AWS profile                                                                                                | —          |
+| `--region <region>`    | AWS region                                                                                                 | —          |
 
 ### 設定ファイル
 
@@ -131,10 +145,7 @@ FetchLogEvents より大量のログを効率よく集計したいときに使�
   "aliases": {
     "prod-api": "/aws/lambda/prod-api"
   },
-  "ignore": [
-    "NoSuchElementException",
-    "/Connection reset by peer/"
-  ],
+  "ignore": ["NoSuchElementException", "/Connection reset by peer/"],
   "defaults": {
     "region": "ap-northeast-1",
     "time": "15m"
@@ -154,6 +165,27 @@ FetchLogEvents より大量のログを効率よく集計したいときに使�
 `--compare` と組み合わせれば「新規パターンのみ」の抽出が強化されます。
 
 認証は AWS 標準 credential chain（環境変数 / shared config / `--profile`）を利用します。
+
+### LLM 要約 (`--ai`)
+
+`--ai` を付けると、集計結果（正規化済みパターン・出現回数・時間窓・サンプル行）を
+Anthropic API に送信し、日本語の要約を本文出力の後に追記します。
+
+- API キーは環境変数のみ: `ANTHROPIC_API_KEY`（モデルは `TB_AI_MODEL` で変更可、既定 `claude-sonnet-5-5`）
+- **送信データは集計スナップショットのみ**（パターン・件数・サンプル）。生ログ全体は送信しません
+- `--format json` / `--live` とは併用できません（それぞれ機械処理用・監視ループ用のため）
+- 要約は画面表示のみで、`--save` のレポートファイルには含まれません
+
+### ログバックエンドの切替 (`--provider`)
+
+`--provider datadog` (または config `defaults.provider: "datadog"`) で、CloudWatch Logs の代わりに
+Datadog Log Management から取得します。
+
+- 「ロググループ」は Datadog の **service** に対応付けられます（`tb errors prod-api` → `service:prod-api`）
+- 認証情報は環境変数でのみ渡します: `DD_API_KEY` / `DD_APP_KEY` / `DD_SITE`（省略時 `datadoghq.com`）
+- `--filter` は CloudWatch Logs のフィルタ構文であり、Datadog には翻訳されません
+  （Datadog クエリ構文の自由文として service 条件と AND 結合されます）
+- `tb tail` / `tb show` も `--provider datadog` で動作します（`tb insights` は CloudWatch Logs Insights 専用）
 
 ## 開発
 

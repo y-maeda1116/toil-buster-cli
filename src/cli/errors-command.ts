@@ -7,7 +7,9 @@ import { compareGroups } from "../core/compare.js";
 import { resolveGroupExpressions } from "../core/resolve-groups.js";
 import { parseIgnoreSpecs } from "../core/ignore.js";
 import { loadConfig } from "../config/load.js";
-import { cloudWatchProviderFactory } from "../providers/factory.js";
+import { providerFor } from "../providers/factory.js";
+import { AnthropicSummarizer } from "../llm/summarizer.js";
+import type { AiSummarizer } from "../llm/summarizer.js";
 import type { InsightsClient } from "../providers/insights.js";
 import type { LogProvider } from "../providers/types.js";
 import { renderJson, toJsonValue } from "../render/json.js";
@@ -18,6 +20,7 @@ import { VERSION } from "../version.js";
 import { buildFilterPattern } from "./filter-pattern.js";
 import { resolveTimeWindow } from "../core/time-window.js";
 import { liveLoop, LiveInterrupted } from "./watch.js";
+import { selectTargetGroup } from "./select-target.js";
 
 export interface CliIo {
   stdout(text: string): void;
@@ -25,7 +28,7 @@ export interface CliIo {
 }
 
 export interface RunDeps {
-  providerFactory(opts: { region?: string; profile?: string }): LogProvider;
+  providerFactory(opts: { provider?: string; region?: string; profile?: string }): LogProvider;
   env: NodeJS.ProcessEnv;
   now(): Date;
   /** --save 用のファイル書き込み (テストで注入する)。 */
@@ -36,6 +39,12 @@ export interface RunDeps {
   clearScreen(): void;
   /** insights コマンド用の Insights クライアント生成 (テストで注入する)。tail/show では未使用。 */
   insightsFactory?(opts: { region?: string; profile?: string }): InsightsClient;
+  /** --ai 用の LLM 要約クライアント生成 (テストで注入する)。 */
+  aiFactory?(): AiSummarizer;
+  /** グループ名省略時の対話選択 UI (テストで注入する)。 */
+  selectGroup?(choices: readonly string[]): Promise<string>;
+  /** stdin が TTY かどうか (テストで注入する)。 */
+  isTTY?(): boolean;
 }
 
 interface ErrorsOptions {
@@ -53,9 +62,11 @@ interface ErrorsOptions {
   live?: string;
   count?: string;
   failOver?: string;
+  ai?: boolean;
   showIgnored?: boolean;
   profile?: string;
   region?: string;
+  provider?: string;
 }
 
 const DEFAULTS = { time: "15m", level: "ERROR", format: "table", top: 20, limit: 1000 } as const;
@@ -104,7 +115,12 @@ function renderResults(results: SummaryResult[], format: string, top: number): s
   return results.map((r) => renderer(r, top)).join("\n");
 }
 
-async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps): Promise<number> {
+async function execute(
+  group: string | undefined,
+  o: ErrorsOptions,
+  io: CliIo,
+  deps: RunDeps
+): Promise<number> {
   // loadConfig が throw しても --format json のエラーを構造化 JSON にできるよう、
   // format は try の前における値で初期化する (妥当性検証は try 内)。
   let format: string = o.format ?? DEFAULTS.format;
@@ -115,6 +131,14 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
       throw new Error(`不正なフォーマット: "${format}" (table | json | md)`);
     }
     const timeSpec = o.time ?? config.defaults.time ?? DEFAULTS.time;
+    if (o.ai !== undefined && o.ai) {
+      if (format === "json") {
+        throw new Error("--ai は --format json と併用できません (json は機械処理用のため)");
+      }
+      if (o.live !== undefined) {
+        throw new Error("--ai は --live と併用できません");
+      }
+    }
     if (o.time !== undefined && (o.since !== undefined || o.until !== undefined)) {
       throw new Error(
         "--time と --since/--until は同時に指定できません。絶対時刻は --since/--until を使ってください"
@@ -126,11 +150,15 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
     const limit = positiveInt("--limit", o.limit ?? config.defaults.limit, DEFAULTS.limit);
     const region = o.region ?? config.defaults.region;
     const profile = o.profile ?? config.defaults.profile;
+    // バックエンドは CLI オプション > config defaults > cloudwatch の順で決める。
+    const providerName = o.provider ?? config.defaults.provider;
 
     const filterPattern = o.filter ?? buildFilterPattern(levelSpec.split(","));
     const compareMs = o.compare === undefined ? undefined : parseDuration(o.compare);
-    const provider = deps.providerFactory({ region, profile });
-    const groups = await resolveGroupExpressions(group, config.aliases, provider);
+    const provider = deps.providerFactory({ provider: providerName, region, profile });
+    // グループ名省略時は一覧からの対話選択 (非 TTY ではエラー)。
+    const target = await selectTargetGroup(group, provider, deps);
+    const groups = await resolveGroupExpressions(target, config.aliases, provider);
     // --show-ignored は既知パターンも確認するモード。比較は表示 groups 基準で行う。
     const ignore = { specs: parseIgnoreSpecs(config.ignore), showIgnored: o.showIgnored };
 
@@ -207,6 +235,13 @@ async function execute(group: string, o: ErrorsOptions, io: CliIo, deps: RunDeps
     if (o.live === undefined) {
       reportResults = await collectResults();
       io.stdout(renderResults(reportResults, format, top));
+      if (o.ai !== undefined && o.ai) {
+        // 集計スナップショット (正規化済みパターン・件数・サンプル) を LLM へ渡して要約。
+        // 送信内容は --help に明記しており、生ログそのものは送らない。
+        const summarizer = deps.aiFactory?.() as AiSummarizer;
+        const snapshot = reportResults.map((r) => toJsonValue(r, top));
+        io.stdout(`## AI 要約\n\n${await summarizer.summarize(snapshot)}\n`);
+      }
       breached = findBreach(reportResults);
     } else {
       // 監視モード: --live 間隔で再取得して画面をクリアし再描画する。
@@ -282,11 +317,11 @@ export async function runErrorsCommand(
   program.configureHelp({
     subcommandTerm: (cmd) => `${cmd.name()} ${cmd.usage()}`,
   });
-  let parsed: { group: string; options: ErrorsOptions } | undefined;
+  let parsed: { group: string | undefined; options: ErrorsOptions } | undefined;
   program
-    .command("errors <group>")
-    .usage("<group>")
-    .description("指定期間のエラーログを抽出して統計表示")
+    .command("errors [group]")
+    .usage("[group]")
+    .description("指定期間のエラーログを抽出して統計表示 (グループ省略時は対話選択)")
     .option("-t, --time <dur>", "時間窓 (10m / 1h / 2d)。デフォルト 15m")
     .option("--since <datetime>", "開始時刻 (ISO 8601。例: 2026-10-18T14:00)。--time と併用不可")
     .option("--until <datetime>", "終了時刻 (ISO 8601)。省略時は現在時刻")
@@ -301,9 +336,18 @@ export async function runErrorsCommand(
     .option("--live <dur>", "監視モード: 指定間隔で再取得して再描画 (例: 30s)")
     .option("--count <n>", "--live の繰り返し回数。省略時は Ctrl+C まで")
     .option("--fail-over <n>", "エラー件数がこの件数を超えたら exit 2 (CI / cron 向け)")
+    .option(
+      "--ai",
+      "集計結果 (正規化パターン・件数・サンプル) を LLM (Anthropic API) に送信して日本語要約を表示。" +
+        "ANTHROPIC_API_KEY が必要。生ログそのものは送信しない"
+    )
     .option("--show-ignored", "config ignore に一致するパターンも表示する")
     .option("--profile <name>", "AWS profile")
     .option("--region <region>", "AWS region")
+    .option(
+      "--provider <name>",
+      "ログバックエンド (cloudwatch | datadog)。datadog は DD_API_KEY / DD_APP_KEY / DD_SITE を使う"
+    )
     .action((group, options) => {
       parsed = { group, options: options as ErrorsOptions };
     });
@@ -314,13 +358,21 @@ export async function runErrorsCommand(
     throw err; // 予期しない例外は index.ts の .catch が拾って exit 1
   }
   if (parsed === undefined) return 0; // --help / --version
+  const env = deps?.env ?? process.env;
   const fullDeps: RunDeps = {
-    providerFactory: deps?.providerFactory ?? cloudWatchProviderFactory,
-    env: deps?.env ?? process.env,
+    providerFactory: deps?.providerFactory ?? ((opts) => providerFor(opts, env)),
+    env,
     now: deps?.now ?? (() => new Date()),
     writeFile: deps?.writeFile ?? ((path, content) => writeFileSync(path, content, "utf8")),
     sleep: deps?.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
     clearScreen: deps?.clearScreen ?? (() => process.stdout.write("\x1b[2J\x1b[H")),
+    aiFactory:
+      deps?.aiFactory ??
+      (() =>
+        new AnthropicSummarizer(globalThis.fetch, {
+          apiKey: env.ANTHROPIC_API_KEY ?? "",
+          model: env.TB_AI_MODEL ?? "claude-sonnet-5-5",
+        })),
   };
   return execute(parsed.group, parsed.options, io, fullDeps);
 }

@@ -703,3 +703,84 @@ describe("runErrorsCommand: --fail-over", () => {
     expect(io.err.join("")).toContain("正の整数");
   });
 });
+
+describe("runErrorsCommand: --provider", () => {
+  it("CLI オプション (--provider datadog) が providerFactory へ渡る", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const providerFactory = vi
+      .fn<(opts: { provider?: string; region?: string; profile?: string }) => LogProvider>()
+      .mockReturnValue({ fetch, listGroupNames: vi.fn() } as unknown as LogProvider);
+    const io = makeIo();
+    const code = await runErrorsCommand(["errors", "g", "--provider", "datadog"], io, {
+      providerFactory,
+      env: { HOME: "/tmp" },
+      now: () => NOW,
+    });
+    expect(code).toBe(0);
+    expect(providerFactory.mock.calls[0]![0].provider).toBe("datadog");
+  });
+
+  it("config defaults.provider が既定になり、CLI オプションで上書きされる", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const providerFactory = vi
+      .fn<(opts: { provider?: string }) => LogProvider>()
+      .mockReturnValue({ fetch, listGroupNames: vi.fn() } as unknown as LogProvider);
+    const env = withConfig(
+      JSON.stringify({
+        aliases: {},
+        ignore: [],
+        defaults: { provider: "datadog" },
+      })
+    );
+    const io = makeIo();
+    await runErrorsCommand(["errors", "g"], io, { providerFactory, env, now: () => NOW });
+    expect(providerFactory.mock.calls[0]![0].provider).toBe("datadog");
+  });
+});
+
+describe("runErrorsCommand: --ai (LLM 要約)", () => {
+  const makeAiDeps = (
+    deps: Partial<RunDeps>,
+    summaryText = "timeout パターンが優勢です。"
+  ): Partial<RunDeps> & { summarize: ReturnType<typeof vi.fn> } => {
+    const summarize = vi
+      .fn<(snapshot: readonly unknown[]) => Promise<string>>()
+      .mockResolvedValue(summaryText);
+    return {
+      ...deps,
+      summarize,
+      aiFactory: () => ({ summarize }),
+    } as Partial<RunDeps> & { summarize: ReturnType<typeof vi.fn> };
+  };
+
+  it("--ai で集計スナップショットを summarizer に渡し、AI 要約セクションを stdout に追記する", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const io = makeIo();
+    const deps = makeAiDeps(makeDeps({ fetch }));
+    const code = await runErrorsCommand(["errors", "g", "--ai"], io, deps);
+    expect(code).toBe(0);
+    expect(deps.summarize).toHaveBeenCalledTimes(1);
+    const snapshot = deps.summarize.mock.calls[0]![0] as readonly Record<string, unknown>[];
+    // スナップショットは JSON 安全化済み (Date ではなく ISO 文字列) でロググループを含む
+    expect(JSON.stringify(snapshot)).toContain('"logGroup":"g"');
+    expect(io.out.join("")).toContain("## AI 要約");
+    expect(io.out.join("")).toContain("timeout パターンが優勢です。");
+  });
+
+  it("--ai と --format json の併用は exit 1", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const io = makeIo();
+    const deps = makeAiDeps(makeDeps({ fetch }));
+    const code = await runErrorsCommand(["errors", "g", "--ai", "--format", "json"], io, deps);
+    expect(code).toBe(1);
+    expect(io.err.join("")).toContain("--ai");
+  });
+
+  it("--help に外部送信データの内容が明記される", async () => {
+    const io = makeIo();
+    const code = await runErrorsCommand(["errors", "--help"], io);
+    expect(code).toBe(0);
+    // 集計結果 (パターン・件数・サンプル) を外部 API へ送る旨を --help に明記
+    expect(io.out.join("")).toContain("ANTHROPIC_API_KEY");
+  });
+});

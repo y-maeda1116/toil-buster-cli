@@ -5,12 +5,14 @@ import { resolveTimeWindow } from "../core/time-window.js";
 import { VERSION } from "../version.js";
 import type { CliIo, RunDeps } from "./errors-command.js";
 import { cloudWatchProviderFactory } from "../providers/factory.js";
+import { selectTargetGroup } from "./select-target.js";
 
 interface TailOptions {
   last?: string;
   lines?: string;
   profile?: string;
   region?: string;
+  provider?: string;
 }
 
 const DEFAULTS = { last: "5m", lines: 50 } as const;
@@ -33,16 +35,24 @@ function formatError(err: unknown): string {
   return `エラー: ${message}\n`;
 }
 
-async function execute(group: string, o: TailOptions, io: CliIo, deps: RunDeps): Promise<number> {
+async function execute(
+  group: string | undefined,
+  o: TailOptions,
+  io: CliIo,
+  deps: RunDeps
+): Promise<number> {
   try {
     const config = loadConfig(deps.env);
     const window = resolveTimeWindow({ time: o.last ?? DEFAULTS.last }, deps.now());
     const lines = positiveInt("--lines", o.lines, DEFAULTS.lines);
     const provider = deps.providerFactory({
+      provider: o.provider ?? config.defaults.provider,
       region: o.region ?? config.defaults.region,
       profile: o.profile ?? config.defaults.profile,
     });
-    const groups = await resolveGroupExpressions(group, config.aliases, provider);
+    // グループ名省略時は一覧からの対話選択 (非 TTY ではエラー)。
+    const target = await selectTargetGroup(group, provider, deps);
+    const groups = await resolveGroupExpressions(target, config.aliases, provider);
 
     for (const logGroup of groups) {
       const { events } = await provider.fetch({
@@ -81,13 +91,17 @@ export async function runTailCommand(
     writeOut: (s) => io.stdout(s),
     writeErr: (s) => io.stderr(s),
   });
-  let parsed: { group: string; options: TailOptions } | undefined;
+  let parsed: { group: string | undefined; options: TailOptions } | undefined;
   program
-    .command("tail <group>")
-    .usage("<group>")
-    .description("直近の生ログを時系列順に表示")
+    .command("tail [group]")
+    .usage("[group]")
+    .description("直近の生ログを時系列順に表示 (グループ省略時は対話選択)")
     .option("--last <dur>", "遡る時間窓 (10m / 1h)。デフォルト 5m")
     .option("--lines <n>", "表示する最大行数。デフォルト 50")
+    .option(
+      "--provider <name>",
+      "ログバックエンド (cloudwatch | datadog)。datadog は DD_API_KEY / DD_APP_KEY / DD_SITE を使う"
+    )
     .option("--profile <name>", "AWS profile")
     .option("--region <region>", "AWS region")
     .action((group, options) => {

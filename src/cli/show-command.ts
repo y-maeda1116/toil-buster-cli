@@ -7,6 +7,7 @@ import type { LogEvent } from "../providers/types.js";
 import { VERSION } from "../version.js";
 import type { CliIo, RunDeps } from "./errors-command.js";
 import { cloudWatchProviderFactory } from "../providers/factory.js";
+import { selectTargetGroup } from "./select-target.js";
 
 interface ShowOptions {
   pattern?: string;
@@ -15,6 +16,7 @@ interface ShowOptions {
   limit?: string;
   profile?: string;
   region?: string;
+  provider?: string;
 }
 
 const DEFAULTS = { time: "15m", context: 2, limit: 1000 } as const;
@@ -37,7 +39,12 @@ function formatError(err: unknown): string {
 const formatLine = (e: LogEvent, matched: boolean): string =>
   `${e.timestamp.toISOString()} ${matched ? "*" : " "} ${e.message}`;
 
-async function execute(group: string, o: ShowOptions, io: CliIo, deps: RunDeps): Promise<number> {
+async function execute(
+  group: string | undefined,
+  o: ShowOptions,
+  io: CliIo,
+  deps: RunDeps
+): Promise<number> {
   try {
     if (o.pattern === undefined) {
       throw new Error("--pattern で表示したい行の正規表現を指定してください");
@@ -55,10 +62,13 @@ async function execute(group: string, o: ShowOptions, io: CliIo, deps: RunDeps):
     const contextLines = positiveInt("--context", o.context, DEFAULTS.context);
     const limit = positiveInt("--limit", o.limit, DEFAULTS.limit);
     const provider = deps.providerFactory({
+      provider: o.provider ?? config.defaults.provider,
       region: o.region ?? config.defaults.region,
       profile: o.profile ?? config.defaults.profile,
     });
-    const groups = await resolveGroupExpressions(group, config.aliases, provider);
+    // グループ名省略時は一覧からの対話選択 (非 TTY ではエラー)。
+    const target = await selectTargetGroup(group, provider, deps);
+    const groups = await resolveGroupExpressions(target, config.aliases, provider);
 
     for (const logGroup of groups) {
       const { events } = await provider.fetch({
@@ -98,15 +108,19 @@ export async function runShowCommand(
     writeOut: (s) => io.stdout(s),
     writeErr: (s) => io.stderr(s),
   });
-  let parsed: { group: string; options: ShowOptions } | undefined;
+  let parsed: { group: string | undefined; options: ShowOptions } | undefined;
   program
-    .command("show <group>")
-    .usage("<group> --pattern <regex>")
-    .description("正規表現に一致した行と前後の文脈を生ログで表示")
+    .command("show [group]")
+    .usage("[group] --pattern <regex>")
+    .description("正規表現に一致した行と前後の文脈を生ログで表示 (グループ省略時は対話選択)")
     .requiredOption("--pattern <regex>", "表示したい行の正規表現")
     .option("-t, --time <dur>", "遡る時間窓。デフォルト 15m")
     .option("--context <n>", "マッチ行の前後文脈行数。デフォルト 2")
     .option("--limit <n>", "取得最大イベント数。デフォルト 1000")
+    .option(
+      "--provider <name>",
+      "ログバックエンド (cloudwatch | datadog)。datadog は DD_API_KEY / DD_APP_KEY / DD_SITE を使う"
+    )
     .option("--profile <name>", "AWS profile")
     .option("--region <region>", "AWS region")
     .action((group, options) => {

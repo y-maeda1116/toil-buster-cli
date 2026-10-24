@@ -9,6 +9,7 @@ import type { InsightsRow } from "../providers/insights.js";
 import { VERSION } from "../version.js";
 import type { CliIo, RunDeps } from "./errors-command.js";
 import { cloudWatchProviderFactory, insightsProviderFactory } from "../providers/factory.js";
+import { selectTargetGroup } from "./select-target.js";
 
 interface InsightsOptions {
   time?: string;
@@ -72,7 +73,7 @@ function renderTable(rows: readonly InsightsRow[]): string {
 }
 
 async function execute(
-  group: string,
+  group: string | undefined,
   o: InsightsOptions,
   io: CliIo,
   deps: RunDeps
@@ -97,7 +98,9 @@ async function execute(
       region: o.region ?? config.defaults.region,
       profile: o.profile ?? config.defaults.profile,
     });
-    const groups = await resolveGroupExpressions(group, config.aliases, provider);
+    // グループ名省略時は一覧からの対話選択 (非 TTY ではエラー)。
+    const target = await selectTargetGroup(group, provider, deps);
+    const groups = await resolveGroupExpressions(target, config.aliases, provider);
     const client = (deps.insightsFactory ?? insightsProviderFactory)({
       region: o.region ?? config.defaults.region,
       profile: o.profile ?? config.defaults.profile,
@@ -149,11 +152,11 @@ export async function runInsightsCommand(
     writeOut: (s) => io.stdout(s),
     writeErr: (s) => io.stderr(s),
   });
-  let parsed: { group: string; options: InsightsOptions } | undefined;
+  let parsed: { group: string | undefined; options: InsightsOptions } | undefined;
   program
-    .command("insights <group>")
-    .usage("<group>")
-    .description("CloudWatch Logs Insights クエリで集計して表示")
+    .command("insights [group]")
+    .usage("[group]")
+    .description("CloudWatch Logs Insights クエリで集計して表示 (グループ省略時は対話選択)")
     .option("-t, --time <dur>", "集計する時間窓 (10m / 1h / 2d)。デフォルト 15m")
     .option("-l, --level <levels>", "既定クエリの対象レベル (カンマ区切り)。デフォルト ERROR")
     .option("--query <queryString>", "Insights クエリを直接指定 (既定クエリを上書き)")

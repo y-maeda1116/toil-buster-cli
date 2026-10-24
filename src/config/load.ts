@@ -14,6 +14,8 @@ const configSchema = z.object({
       profile: z.string().optional(),
       top: z.number().int().positive().optional(),
       limit: z.number().int().positive().optional(),
+      // 使用するログバックエンド (cloudwatch | datadog)。
+      provider: z.enum(["cloudwatch", "datadog"]).optional(),
     })
     .default({}),
 });
