@@ -54,6 +54,9 @@ tb errors prod-api --time 30m --live 30s
 
 # 10 回だけ監視して自動終了
 tb errors prod-api --live 1m --count 10
+
+# CI / cron で閾値超過時に異常終了 (exit 2)
+tb errors prod-api --time 10m --fail-over 100 --format json
 ```
 
 ### ロググループの指定
@@ -97,6 +100,7 @@ tb errors prod-api --live 1m --count 10
 | `--save <path>` | メタ情報付きインシデントレポート (Markdown) を指定パスに保存。stdout 出力は通常どおり | — |
 | `--live <dur>` | 監視モード: 指定間隔で再取得して画面をクリアし再描画。Ctrl+C で終了 | — |
 | `--count <n>` | `--live` の繰り返し回数。省略時は Ctrl+C まで | — |
+| `--fail-over <n>` | エラー件数 (取得イベント総数) が閾値を超えたら exit 2。終了コードは 0=正常 / 1=コマンドエラー / 2=閾値超過 | — |
 | `--profile <name>` | AWS profile | — |
 | `--region <region>` | AWS region | — |
 
