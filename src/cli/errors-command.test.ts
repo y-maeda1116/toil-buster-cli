@@ -617,6 +617,21 @@ describe("runErrorsCommand: --live", () => {
     expect(calls[1]!.startTime.getTime()).toBe(calls[0]!.startTime.getTime());
   });
 
+  it("--live と --save の併用では最後の tick の集計をレポートに書く", async () => {
+    const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(okResult);
+    const io = makeIo();
+    const cleared: string[] = [];
+    const saved: string[] = [];
+    const code = await runErrorsCommand(
+      ["errors", "g", "--live", "30s", "--count", "2", "--save", "report.md"],
+      io,
+      { ...makeLiveDeps({ fetch }, cleared), writeFile: (_path, content) => saved.push(content) }
+    );
+    expect(code).toBe(0);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toContain("# Log Summary: g");
+  });
+
   it("--live に不正な間隔はエラーで終了する", async () => {
     const io = makeIo();
     const cleared: string[] = [];
@@ -690,6 +705,19 @@ describe("runErrorsCommand: --fail-over", () => {
     });
     expect(code).toBe(2);
     expect(cleared).toHaveLength(1); // 2 回目の tick の前に中断
+  });
+
+  it("閾値が --limit 以上だと打ち切りで超過を判定できないためエラーで終了する", async () => {
+    const fetch = vi.fn();
+    const io = makeIo();
+    const code = await runErrorsCommand(
+      ["errors", "g", "--fail-over", "1000"],
+      io,
+      makeDeps({ fetch })
+    );
+    expect(code).toBe(1);
+    expect(io.err.join("")).toContain("--limit (1000) より小さく");
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("閾値が 0 以下はエラーで終了する", async () => {

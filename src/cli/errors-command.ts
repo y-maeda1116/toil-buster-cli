@@ -230,6 +230,12 @@ async function execute(
     // 終了コードは 0=正常 / 1=コマンドエラー / 2=閾値超過 で CI から区別できる。
     const threshold =
       o.failOver === undefined ? undefined : positiveInt("--fail-over", o.failOver, 1);
+    // totalEvents は --limit で頭打ちになるため、閾値が --limit 以上だと超過を検知できない。
+    if (threshold !== undefined && threshold >= limit) {
+      throw new Error(
+        `--fail-over (${threshold}) は --limit (${limit}) より小さくしてください。取得が --limit で打ち切られるため超過を判定できません`
+      );
+    }
     const findBreach = (results: SummaryResult[]): SummaryResult | undefined =>
       threshold === undefined ? undefined : results.find((r) => r.totalEvents > threshold);
     if (o.live === undefined) {
@@ -252,6 +258,7 @@ async function execute(
         { intervalMs, count: liveCount },
         async () => {
           const results = await collectResults();
+          reportResults = results; // --save には最後の tick の集計を書く
           const header = `監視中: ${o.live}間隔で更新 (Ctrl+C で終了)  最終更新: ${deps.now().toISOString()}\n\n`;
           io.stdout(header + renderResults(results, format, top));
           const hit = findBreach(results);
@@ -278,7 +285,7 @@ async function execute(
         const message = cause instanceof Error ? cause.message : String(cause);
         throw new Error(`レポートの保存に失敗しました: ${o.save} (${message})`, { cause });
       }
-      io.stderr(`レポートを保存しました: ${o.save}`);
+      io.stderr(`レポートを保存しました: ${o.save}\n`);
     }
     if (breached !== undefined) {
       io.stderr(
