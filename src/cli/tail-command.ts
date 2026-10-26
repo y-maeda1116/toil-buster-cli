@@ -4,6 +4,7 @@ import { resolveGroupExpressions } from "../core/resolve-groups.js";
 import { resolveTimeWindow } from "../core/time-window.js";
 import { VERSION } from "../version.js";
 import type { CliIo, RunDeps } from "./errors-command.js";
+import type { LogEvent, LogProvider } from "../providers/types.js";
 import { cloudWatchProviderFactory } from "../providers/factory.js";
 import { selectTargetGroup } from "./select-target.js";
 
@@ -16,6 +17,10 @@ interface TailOptions {
 }
 
 const DEFAULTS = { last: "5m", lines: 50 } as const;
+
+// 1 回の fetch で取る最大件数 (--lines の上限も兼ねる) と、開始時刻の二分探索の最大回数。
+const TAIL_FETCH_CAP = 10_000;
+const MAX_PROBES = 20;
 
 // 生ログは調査の起点になるため UTC ISO で出す (タイムゾーン誤読を防ぐ)。
 const formatEvent = (timestamp: Date, message: string): string =>
@@ -35,6 +40,41 @@ function formatError(err: unknown): string {
   return `エラー: ${message}\n`;
 }
 
+// FilterLogEvents は古い順に返して limit で打ち切るため、窓全体を limit: lines で取ると
+// 窓の先頭 (最古) の行になる。打ち切られずに lines 件以上が収まる開始時刻を
+// 窓の末尾側へ二分探索し、その範囲を取得する (少量の窓なら 1 回の fetch で済む)。
+async function fetchTail(
+  provider: LogProvider,
+  logGroup: string,
+  window: { start: Date; end: Date },
+  lines: number
+): Promise<LogEvent[]> {
+  let lo = window.start.getTime(); // ここから取ると打ち切られる (多すぎる) 側
+  let hi = window.end.getTime(); // ここから取ると lines 件に満たない (少なすぎる) 側
+  let start = lo;
+  let best: LogEvent[] = [];
+  for (let probe = 0; probe < MAX_PROBES; probe++) {
+    const { events, truncated } = await provider.fetch({
+      logGroup,
+      startTime: new Date(start),
+      endTime: window.end,
+      filterPattern: "",
+      limit: TAIL_FETCH_CAP,
+    });
+    if (truncated) {
+      lo = start;
+    } else {
+      best = events;
+      if (events.length >= lines || start === window.start.getTime()) break;
+      hi = start;
+    }
+    const next = Math.floor((lo + hi) / 2);
+    if (next === start) break;
+    start = next;
+  }
+  return best;
+}
+
 async function execute(
   group: string | undefined,
   o: TailOptions,
@@ -45,6 +85,9 @@ async function execute(
     const config = loadConfig(deps.env);
     const window = resolveTimeWindow({ time: o.last ?? DEFAULTS.last }, deps.now());
     const lines = positiveInt("--lines", o.lines, DEFAULTS.lines);
+    if (lines > TAIL_FETCH_CAP) {
+      throw new Error(`--lines は ${TAIL_FETCH_CAP} 以下を指定してください: "${lines}"`);
+    }
     const provider = deps.providerFactory({
       provider: o.provider ?? config.defaults.provider,
       region: o.region ?? config.defaults.region,
@@ -55,13 +98,7 @@ async function execute(
     const groups = await resolveGroupExpressions(target, config.aliases, provider);
 
     for (const logGroup of groups) {
-      const { events } = await provider.fetch({
-        logGroup,
-        startTime: window.start,
-        endTime: window.end,
-        filterPattern: "",
-        limit: lines,
-      });
+      const events = await fetchTail(provider, logGroup, window, lines);
       if (groups.length > 1) io.stdout(`=== ${logGroup} ===\n`);
       if (events.length === 0) {
         io.stdout("該当時間帯にログは見つかりませんでした\n");

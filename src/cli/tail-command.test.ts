@@ -42,11 +42,50 @@ describe("runTailCommand", () => {
     expect(out).toContain("2026-10-03T09:57:00.000Z oldest");
   });
 
-  it("fetch には空 filterPattern と --lines 件数が渡る", async () => {
+  it("fetch には空 filterPattern が渡る", async () => {
     const fetch = vi.fn<(q: LogQuery) => Promise<FetchResult>>().mockResolvedValue(fetchResult([]));
     const io = makeIo();
     await runTailCommand(["tail", "g", "--lines", "25"], io, makeDeps({ fetch }));
-    expect(fetch).toHaveBeenCalledWith(expect.objectContaining({ filterPattern: "", limit: 25 }));
+    expect(fetch).toHaveBeenCalledWith(expect.objectContaining({ filterPattern: "" }));
+  });
+
+  it("取得が打ち切られる量のログでも最古ではなく直近の --lines 件を出す", async () => {
+    // CloudWatch と同じく古い順に返し、limit 件で打ち切る provider。
+    const all: LogEvent[] = Array.from({ length: 30_000 }, (_, i) => ({
+      timestamp: new Date(NOW.getTime() - (30_000 - i) * 100),
+      message: `line-${i}`,
+    }));
+    const fetch = vi.fn(async (q: LogQuery): Promise<FetchResult> => {
+      const inWindow = all.filter(
+        (e) =>
+          e.timestamp.getTime() >= q.startTime.getTime() &&
+          e.timestamp.getTime() <= q.endTime.getTime()
+      );
+      return { events: inWindow.slice(0, q.limit), truncated: inWindow.length > q.limit };
+    });
+    const io = makeIo();
+    const code = await runTailCommand(
+      ["tail", "g", "--last", "1h", "--lines", "3"],
+      io,
+      makeDeps({ fetch })
+    );
+    expect(code).toBe(0);
+    const out = io.out.join("");
+    expect(out).toContain("line-29999");
+    expect(out).toContain("line-29997");
+    expect(out).not.toContain("line-29996");
+    expect(out).not.toContain("line-0\n");
+  });
+
+  it("--lines の上限を超える指定はエラーで終了する", async () => {
+    const io = makeIo();
+    const code = await runTailCommand(
+      ["tail", "g", "--lines", "10001"],
+      io,
+      makeDeps({ fetch: vi.fn() })
+    );
+    expect(code).toBe(1);
+    expect(io.err.join("")).toContain("10000");
   });
 
   it("--last が時間窓になる", async () => {
