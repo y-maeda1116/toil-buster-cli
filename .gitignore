@@ -32,3 +32,9 @@ coverage/
 
 # Vitest (attachments / reports)
 .vitest/
+
+# Serena MCP (プロジェクトごとに再生成されるローカル設定)
+.serena/
+
+# Claude Code worktrees
+.claude/worktrees/
